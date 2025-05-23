@@ -351,7 +351,6 @@ function Import-ModuleFromCache {
             Write-LogMessage -Message "Using cached $ModuleName module" -Type Info -LogOnly
         }
         
-        # Load the module
         Write-LogMessage -Message "Loading $ModuleName module from: $localPath" -Type Info
         
         # Check if file exists and has content
@@ -368,27 +367,18 @@ function Import-ModuleFromCache {
             return $false
         }
         
-        # Dot source the module
-        . $localPath
+        # Execute the module file directly in the global scope using dot sourcing with proper path
+        & {
+            param($ModulePath)
+            . $ModulePath
+        } $localPath
         
         Write-LogMessage -Message "Successfully loaded $ModuleName module" -Type Success
-        
-        # Debug: List functions that were loaded
-        $functionsBefore = Get-Command -CommandType Function | Select-Object -ExpandProperty Name
-        . $localPath
-        $functionsAfter = Get-Command -CommandType Function | Select-Object -ExpandProperty Name
-        $newFunctions = Compare-Object -ReferenceObject $functionsBefore -DifferenceObject $functionsAfter | Where-Object { $_.SideIndicator -eq '=>' } | Select-Object -ExpandProperty InputObject
-        
-        if ($newFunctions) {
-            Write-LogMessage -Message "Functions loaded from $ModuleName module: $($newFunctions -join ', ')" -Type Info
-        } else {
-            Write-LogMessage -Message "Warning: No new functions detected after loading $ModuleName module" -Type Warning
-        }
-        
         return $true
     }
     catch {
         Write-LogMessage -Message "Failed to load $ModuleName module: $($_.Exception.Message)" -Type Error
+        Write-LogMessage -Message "Error details: $($_.Exception.ToString())" -Type Error -LogOnly
         return $false
     }
 }
@@ -614,7 +604,42 @@ function Start-Setup {
                 else {
                     $moduleLoaded = Import-ModuleFromCache -ModuleName "Users"
                     if ($moduleLoaded) {
-                        $usersCreated = New-TenantUsers
+                        Write-LogMessage -Message "Attempting to call New-TenantUsers..." -Type Info
+                        
+                        # Test if the function is available by trying to get its definition
+                        try {
+                            $functionDef = Get-Command New-TenantUsers -ErrorAction Stop
+                            Write-LogMessage -Message "New-TenantUsers function found with source: $($functionDef.Source)" -Type Success
+                            
+                            # Call the function
+                            $usersCreated = New-TenantUsers
+                            Write-LogMessage -Message "New-TenantUsers completed successfully" -Type Success
+                        }
+                        catch [System.Management.Automation.CommandNotFoundException] {
+                            Write-LogMessage -Message "New-TenantUsers function not found after module load" -Type Error
+                            
+                            # Try alternative function calling methods
+                            Write-LogMessage -Message "Attempting direct execution from module file..." -Type Info
+                            try {
+                                # Get the cached module path and execute it directly
+                                $fileName = $GitHubConfig.ModuleFiles["Users"]
+                                $localPath = Join-Path -Path $GitHubConfig.CacheDirectory -ChildPath $fileName
+                                
+                                # Source the file and call the function in one go
+                                $result = & {
+                                    . $localPath
+                                    New-TenantUsers
+                                }
+                                Write-LogMessage -Message "Direct execution successful" -Type Success
+                            }
+                            catch {
+                                Write-LogMessage -Message "Direct execution also failed: $($_.Exception.Message)" -Type Error
+                                Write-LogMessage -Message "This indicates a dependency issue with core functions" -Type Warning
+                            }
+                        }
+                        catch {
+                            Write-LogMessage -Message "Error calling New-TenantUsers: $($_.Exception.Message)" -Type Error
+                        }
                     }
                     else {
                         Write-LogMessage -Message "Failed to load Users module. Please check your internet connection." -Type Error
