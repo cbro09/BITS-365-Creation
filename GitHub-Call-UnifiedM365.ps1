@@ -352,10 +352,39 @@ function Import-ModuleFromCache {
         }
         
         # Load the module
-        Write-LogMessage -Message "Loading $ModuleName module..." -Type Info -LogOnly
+        Write-LogMessage -Message "Loading $ModuleName module from: $localPath" -Type Info
+        
+        # Check if file exists and has content
+        if (-not (Test-Path -Path $localPath)) {
+            Write-LogMessage -Message "Module file not found at: $localPath" -Type Error
+            return $false
+        }
+        
+        $fileSize = (Get-Item $localPath).Length
+        Write-LogMessage -Message "Module file size: $fileSize bytes" -Type Info -LogOnly
+        
+        if ($fileSize -eq 0) {
+            Write-LogMessage -Message "Module file is empty" -Type Error
+            return $false
+        }
+        
+        # Dot source the module
         . $localPath
         
-        Write-LogMessage -Message "Successfully loaded $ModuleName module" -Type Success -LogOnly
+        Write-LogMessage -Message "Successfully loaded $ModuleName module" -Type Success
+        
+        # Debug: List functions that were loaded
+        $functionsBefore = Get-Command -CommandType Function | Select-Object -ExpandProperty Name
+        . $localPath
+        $functionsAfter = Get-Command -CommandType Function | Select-Object -ExpandProperty Name
+        $newFunctions = Compare-Object -ReferenceObject $functionsBefore -DifferenceObject $functionsAfter | Where-Object { $_.SideIndicator -eq '=>' } | Select-Object -ExpandProperty InputObject
+        
+        if ($newFunctions) {
+            Write-LogMessage -Message "Functions loaded from $ModuleName module: $($newFunctions -join ', ')" -Type Info
+        } else {
+            Write-LogMessage -Message "Warning: No new functions detected after loading $ModuleName module" -Type Warning
+        }
+        
         return $true
     }
     catch {
