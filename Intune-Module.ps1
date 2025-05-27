@@ -308,9 +308,15 @@ function Enable-WindowsLAPS {
 function New-PowerOptionsPolicy {
     Write-LogMessage -Message "Creating complete Power Options policy..." -Type Info
     
+    $policyName = "Power Options"
+    if (Test-PolicyExists -PolicyName $policyName) {
+        Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
+        return @{ name = $policyName; id = "existing" }
+    }
+    
     try {
         $body = @{
-            name = "Power Options"
+            name = $policyName
             description = "Comprehensive power management settings for devices"
             platforms = "windows10"
             technologies = "mdm"
@@ -1756,9 +1762,15 @@ function New-DefenderPolicy {
 function New-FirewallPolicy {
     Write-LogMessage -Message "Creating Windows Firewall policy with template..." -Type Info
     
+    $policyName = "Firewall Windows default policy"
+    if (Test-PolicyExists -PolicyName $policyName) {
+        Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
+        return @{ name = $policyName; id = "existing" }
+    }
+    
     try {
         $body = @{
-            name = "Firewall Windows default policy"
+            name = $policyName
             description = "Default policy sets settings for all endpoints that are not governed by any other policy, ensuring that all your clients are managed as soon as MDE is deployed. The default policy is based on a set of pre-configured recommended settings and can be adjusted by user with admin priviledges."
             platforms = "windows10"
             technologies = "mdm,microsoftSense"
@@ -1890,9 +1902,15 @@ function New-FirewallPolicy {
 function New-TamperProtectionPolicy {
     Write-LogMessage -Message "Creating Tamper Protection policy..." -Type Info
     
+    $policyName = "Tamper Protection"
+    if (Test-PolicyExists -PolicyName $policyName) {
+        Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
+        return @{ name = $policyName; id = "existing" }
+    }
+    
     try {
         $body = @{
-            name = "Tamper Protection"
+            name = $policyName
             description = "Windows Security tamper protection configuration"
             platforms = "windows10"
             technologies = "mdm,microsoftSense"
@@ -2175,9 +2193,15 @@ function New-LAPSPolicy {
 function New-AdminAccountPolicy {
     Write-LogMessage -Message "Creating Admin Account policy with rename..." -Type Info
     
+    $policyName = "Enable Built-in Administrator Account"
+    if (Test-PolicyExists -PolicyName $policyName) {
+        Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
+        return @{ name = $policyName; id = "existing" }
+    }
+    
     try {
         $body = @{
-            name = "Enable Built-in Administrator Account"
+            name = $policyName
             description = "Enable and configure built-in administrator account for LAPS"
             platforms = "windows10"
             technologies = "mdm"
@@ -2226,9 +2250,15 @@ function New-AdminAccountPolicy {
 function New-UnenrollmentPolicy {
     Write-LogMessage -Message "Creating Device Unenrollment Prevention policy..." -Type Info
     
+    $policyName = "Prevent Users From Unenrolling Devices"
+    if (Test-PolicyExists -PolicyName $policyName) {
+        Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
+        return @{ name = $policyName; id = "existing" }
+    }
+    
     try {
         $body = @{
-            name = "Prevent Users From Unenrolling Devices"
+            name = $policyName
             description = "Prevent users from manually unenrolling devices from Intune"
             platforms = "windows10"
             technologies = "mdm"
@@ -2260,9 +2290,15 @@ function New-UnenrollmentPolicy {
 function New-OfficePolicies {
     Write-LogMessage -Message "Creating Office configuration policies..." -Type Info
     
+    $policyName = "Office Updates"
+    if (Test-PolicyExists -PolicyName $policyName) {
+        Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
+        return @{ name = $policyName; id = "existing" }
+    }
+    
     try {
         $body = @{
-            name = "Office Updates Configuration"
+            name = $policyName
             description = "Microsoft Office update settings"
             platforms = "windows10"
             technologies = "mdm"
@@ -2294,9 +2330,15 @@ function New-OfficePolicies {
 function New-OutlookPolicy {
     Write-LogMessage -Message "Creating Outlook configuration policy..." -Type Info
     
+    $policyName = "Outlook"
+    if (Test-PolicyExists -PolicyName $policyName) {
+        Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
+        return @{ name = $policyName; id = "existing" }
+    }
+    
     try {
         $body = @{
-            name = "Outlook Configuration"
+            name = $policyName
             description = "Microsoft Outlook user experience settings"
             platforms = "windows10"
             technologies = "mdm"
@@ -2330,9 +2372,15 @@ function New-OutlookPolicy {
 function New-EdgeUpdatePolicy {
     Write-LogMessage -Message "Creating Edge Update policy..." -Type Info
     
+    $policyName = "Edge Update Policy"
+    if (Test-PolicyExists -PolicyName $policyName) {
+        Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
+        return @{ name = $policyName; id = "existing" }
+    }
+    
     try {
         $body = @{
-            name = "Edge Update Policy"
+            name = $policyName
             description = "Microsoft Edge update configuration"
             platforms = "windows10"
             technologies = "mdm"
@@ -2441,9 +2489,15 @@ function New-EdgeUpdatePolicy {
 function New-DisableUACPolicy {
     Write-LogMessage -Message "Creating Disable UAC for QuickAssist policy..." -Type Info
     
+    $policyName = "Disable UAC for Quickassist"
+    if (Test-PolicyExists -PolicyName $policyName) {
+        Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
+        return @{ name = $policyName; id = "existing" }
+    }
+    
     try {
         $body = @{
-            name = "Disable UAC for Quickassist"
+            name = $policyName
             description = "Disable UAC secure desktop prompt for QuickAssist"
             platforms = "windows10"
             technologies = "mdm"
