@@ -578,19 +578,22 @@ function Start-Setup {
                 Read-Host "Press Enter to continue"
             }
             5 {
-                # Configure Intune
-                if (-not (Get-MgContext)) {
-                    Write-LogMessage -Message "Not connected to Microsoft Graph. Please connect first." -Type Warning
-                }
-                else {
-                    $moduleLoaded = Import-ModuleFromCache -ModuleName "Intune"
-                    if ($moduleLoaded) {
-                        $intuneSetup = New-TenantIntune
-                    }
-                    else {
-                        Write-LogMessage -Message "Failed to load Intune module. Please check your internet connection." -Type Error
-                    }
-                }
+    # Configure Intune
+    if (-not (Get-MgContext)) {
+        Write-LogMessage -Message "Not connected to Microsoft Graph. Please connect first." -Type Warning
+    }
+    else {
+        # Remove old function from memory
+        Remove-Item -Path Function:\New-TenantIntune -ErrorAction SilentlyContinue
+
+        $moduleLoaded = Import-ModuleFromCache -ModuleName "Intune"
+        if ($moduleLoaded) {
+            $intuneSetup = New-TenantIntune
+        }
+        else {
+            Write-LogMessage -Message "Failed to load Intune module. Please check your internet connection." -Type Error
+        }
+    }
                 Read-Host "Press Enter to continue"
             }
             6 {
