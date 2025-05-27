@@ -90,7 +90,9 @@ function New-TenantIntune {
         $policies += New-DefenderAntivirusPolicy  
         $policies += New-FirewallPolicy
         $policies += New-TamperProtectionPolicy
-        $policies += New-EDRPolicy
+        
+        # Show EDR note instead of trying to create
+        Show-EDREnablementNote
         
         # BitLocker encryption
         $policies += New-BitLockerPolicy
@@ -106,8 +108,10 @@ function New-TenantIntune {
         
         # Application policies
         $policies += New-EdgePolicies
+        $policies += New-EdgeUpdatePolicy
         $policies += New-OfficePolicies
         $policies += New-OutlookPolicy
+        $policies += New-DisableUACPolicy
         
         # Assign policies to device groups
         $deviceGroups = @("WindowsDeviceRing0", "WindowsDeviceRing1", "WindowsDeviceRing2")
@@ -502,9 +506,15 @@ function New-DefenderAntivirusPolicy {
 function New-BitLockerPolicy {
     Write-LogMessage -Message "Creating comprehensive BitLocker policy with 13 settings..." -Type Info
     
+    $policyName = "Enable Bitlocker"
+    if (Test-PolicyExists -PolicyName $policyName) {
+        Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
+        return @{ name = $policyName; id = "existing" }
+    }
+    
     try {
         $body = @{
-            name = "Enable Bitlocker"
+            name = $policyName
             description = "Comprehensive BitLocker drive encryption configuration"
             platforms = "windows10"
             technologies = "mdm"
@@ -936,9 +946,15 @@ function New-BitLockerPolicy {
 function New-OneDrivePolicy {
     Write-LogMessage -Message "Creating comprehensive OneDrive policy..." -Type Info
     
+    $policyName = "OneDrive Configuration"
+    if (Test-PolicyExists -PolicyName $policyName) {
+        Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
+        return @{ name = $policyName; id = "existing" }
+    }
+    
     try {
         $body = @{
-            name = "OneDrive Configuration"
+            name = $policyName
             description = "OneDrive for Business configuration with Known Folder Move"
             platforms = "windows10"
             technologies = "mdm"
@@ -1088,12 +1104,18 @@ function New-OneDrivePolicy {
 function New-EdgePolicies {
     Write-LogMessage -Message "Creating Edge policy with SharePoint homepage..." -Type Info
     
+    $policyName = "Default Web Pages"
+    if (Test-PolicyExists -PolicyName $policyName) {
+        Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
+        return @{ name = $policyName; id = "existing" }
+    }
+    
     try {
         # Get SharePoint root site URL from tenant
         $sharePointUrl = Get-SharePointRootSiteUrl
         
         $body = @{
-            name = "Default Web Pages"
+            name = $policyName
             description = "Setting SharePoint home page as default start up page"
             platforms = "windows10"
             technologies = "mdm"
@@ -1990,6 +2012,12 @@ function New-EDRPolicy {
 function New-LAPSPolicy {
     Write-LogMessage -Message "Creating LAPS policy with domain-based admin name..." -Type Info
     
+    $policyName = "LAPS"
+    if (Test-PolicyExists -PolicyName $policyName) {
+        Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
+        return @{ name = $policyName; id = "existing" }
+    }
+    
     try {
         # Get domain initials from tenant
         $adminAccountName = "localadmin"
@@ -2003,7 +2031,7 @@ function New-LAPSPolicy {
         Write-LogMessage -Message "Setting LAPS admin account name to: $adminAccountName" -Type Info
         
         $body = @{
-            name = "LAPS"
+            name = $policyName
             description = "Local Admin Password Solution"
             platforms = "windows10"
             technologies = "mdm"
@@ -2298,6 +2326,186 @@ function New-OutlookPolicy {
 }
 
 # === Helper Functions ===
+
+function New-EdgeUpdatePolicy {
+    Write-LogMessage -Message "Creating Edge Update policy..." -Type Info
+    
+    try {
+        $body = @{
+            name = "Edge Update Policy"
+            description = "Microsoft Edge update configuration"
+            platforms = "windows10"
+            technologies = "mdm"
+            templateReference = @{
+                templateId = ""
+                templateFamily = "none"
+            }
+            settings = @(
+                # Target Channel
+                @{
+                    id = "0"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                        settingDefinitionId = "device_vendor_msft_policy_config_updatev95~policy~cat_edgeupdate~cat_applications~cat_microsoftedge_pol_targetchannelmicrosoftedge"
+                        choiceSettingValue = @{
+                            value = "device_vendor_msft_policy_config_updatev95~policy~cat_edgeupdate~cat_applications~cat_microsoftedge_pol_targetchannelmicrosoftedge_1"
+                            children = @(
+                                @{
+                                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                                    settingDefinitionId = "device_vendor_msft_policy_config_updatev95~policy~cat_edgeupdate~cat_applications~cat_microsoftedge_pol_targetchannelmicrosoftedge_part_targetchannel"
+                                    choiceSettingValue = @{
+                                        value = "device_vendor_msft_policy_config_updatev95~policy~cat_edgeupdate~cat_applications~cat_microsoftedge_pol_targetchannelmicrosoftedge_part_targetchannel_stable"
+                                        children = @()
+                                    }
+                                }
+                            )
+                        }
+                    }
+                },
+                # Update Policy Microsoft Edge
+                @{
+                    id = "1"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                        settingDefinitionId = "device_vendor_msft_policy_config_update~policy~cat_google~cat_googleupdate~cat_applications~cat_microsoftedge_pol_updatepolicymicrosoftedge"
+                        choiceSettingValue = @{
+                            value = "device_vendor_msft_policy_config_update~policy~cat_google~cat_googleupdate~cat_applications~cat_microsoftedge_pol_updatepolicymicrosoftedge_1"
+                            children = @(
+                                @{
+                                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                                    settingDefinitionId = "device_vendor_msft_policy_config_update~policy~cat_google~cat_googleupdate~cat_applications~cat_microsoftedge_pol_updatepolicymicrosoftedge_part_updatepolicy"
+                                    choiceSettingValue = @{
+                                        value = "device_vendor_msft_policy_config_update~policy~cat_google~cat_googleupdate~cat_applications~cat_microsoftedge_pol_updatepolicymicrosoftedge_part_updatepolicy_1"
+                                        children = @()
+                                    }
+                                }
+                            )
+                        }
+                    }
+                },
+                # Default Update Policy
+                @{
+                    id = "2"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                        settingDefinitionId = "device_vendor_msft_policy_config_update~policy~cat_google~cat_googleupdate~cat_applications_pol_defaultupdatepolicy"
+                        choiceSettingValue = @{
+                            value = "device_vendor_msft_policy_config_update~policy~cat_google~cat_googleupdate~cat_applications_pol_defaultupdatepolicy_1"
+                            children = @(
+                                @{
+                                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                                    settingDefinitionId = "device_vendor_msft_policy_config_update~policy~cat_google~cat_googleupdate~cat_applications_pol_defaultupdatepolicy_part_updatepolicy"
+                                    choiceSettingValue = @{
+                                        value = "device_vendor_msft_policy_config_update~policy~cat_google~cat_googleupdate~cat_applications_pol_defaultupdatepolicy_part_updatepolicy_1"
+                                        children = @()
+                                    }
+                                }
+                            )
+                        }
+                    }
+                },
+                # Auto Update Check Period
+                @{
+                    id = "3"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                        settingDefinitionId = "device_vendor_msft_policy_config_update~policy~cat_google~cat_googleupdate~cat_preferences_pol_autoupdatecheckperiod"
+                        choiceSettingValue = @{
+                            value = "device_vendor_msft_policy_config_update~policy~cat_google~cat_googleupdate~cat_preferences_pol_autoupdatecheckperiod_1"
+                            children = @(
+                                @{
+                                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance"
+                                    settingDefinitionId = "device_vendor_msft_policy_config_update~policy~cat_google~cat_googleupdate~cat_preferences_pol_autoupdatecheckperiod_part_autoupdatecheckperiod"
+                                    simpleSettingValue = @{
+                                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationIntegerSettingValue"
+                                        value = 700
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+            )
+        }
+        
+        $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" -Body $body
+        Write-LogMessage -Message "Created Edge Update policy" -Type Success
+        return $result
+    }
+    catch {
+        Write-LogMessage -Message "Failed to create Edge Update policy - $($_.Exception.Message)" -Type Error
+        return $null
+    }
+}
+
+function New-DisableUACPolicy {
+    Write-LogMessage -Message "Creating Disable UAC for QuickAssist policy..." -Type Info
+    
+    try {
+        $body = @{
+            name = "Disable UAC for Quickassist"
+            description = "Disable UAC secure desktop prompt for QuickAssist"
+            platforms = "windows10"
+            technologies = "mdm"
+            templateReference = @{
+                templateId = ""
+                templateFamily = "none"
+            }
+            settings = @(
+                @{
+                    id = "0"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                        settingDefinitionId = "device_vendor_msft_policy_config_localpoliciessecurityoptions_useraccountcontrol_switchtothesecuredesktopwhenpromptingforelevation"
+                        choiceSettingValue = @{
+                            value = "device_vendor_msft_policy_config_localpoliciessecurityoptions_useraccountcontrol_switchtothesecuredesktopwhenpromptingforelevation_0"
+                            children = @()
+                        }
+                    }
+                }
+            )
+        }
+        
+        $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" -Body $body
+        Write-LogMessage -Message "Created Disable UAC for QuickAssist policy" -Type Success
+        return $result
+    }
+    catch {
+        Write-LogMessage -Message "Failed to create Disable UAC policy - $($_.Exception.Message)" -Type Error
+        return $null
+    }
+}
+
+# === Helper Functions ===
+
+function Test-PolicyExists {
+    param (
+        [string]$PolicyName
+    )
+    
+    try {
+        $existingPolicies = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" -ErrorAction Stop
+        
+        foreach ($policy in $existingPolicies.value) {
+            if ($policy.name -eq $PolicyName) {
+                return $true
+            }
+        }
+        return $false
+    }
+    catch {
+        Write-LogMessage -Message "Error checking existing policies: $($_.Exception.Message)" -Type Warning -LogOnly
+        return $false
+    }
+}
+
+function Show-EDREnablementNote {
+    Write-LogMessage -Message "EDR Policy requires manual enablement:" -Type Warning
+    Write-LogMessage -Message "1. Go to https://security.microsoft.com" -Type Info
+    Write-LogMessage -Message "2. Navigate to Settings > Endpoints > Device management > Onboarding" -Type Info
+    Write-LogMessage -Message "3. Enable Microsoft Defender for Business" -Type Info
+    Write-LogMessage -Message "4. Configure the security connector" -Type Info
+}
 
 function Get-SharePointRootSiteUrl {
     try {
