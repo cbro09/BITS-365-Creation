@@ -368,7 +368,7 @@ function Import-ModuleFromCache {
         }
         
         # Execute the module file directly in the global scope using dot sourcing with proper path
-        . $localPath
+        Invoke-Expression (Get-Content $localPath -Raw)
         
         Write-LogMessage -Message "Successfully loaded $ModuleName module" -Type Success
         return $true
