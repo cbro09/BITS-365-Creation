@@ -1,11 +1,24 @@
+# === Intune.ps1 ===
+# Microsoft Intune configuration and policy management functions
+
 function New-TenantIntune {
     Write-LogMessage -Message "Starting Intune configuration..." -Type Info
     
-    # COMPLETE module reset to match working user script exactly
+    # Use the exact same pattern as working New-TenantUsers script
     try {
+        # Store core functions to prevent them being cleared
+        $writeLopFunction = ${function:Write-LogMessage}
+        $testNotEmptyFunction = ${function:Test-NotEmpty}
+        $showProgressFunction = ${function:Show-Progress}
+        
         # Remove ALL Graph modules first to avoid conflicts
         Write-LogMessage -Message "Clearing all Graph modules to prevent conflicts..." -Type Info
         Get-Module Microsoft.Graph* | Remove-Module -Force -ErrorAction SilentlyContinue
+        
+        # Restore core functions
+        ${function:Write-LogMessage} = $writeLopFunction
+        ${function:Test-NotEmpty} = $testNotEmptyFunction
+        ${function:Show-Progress} = $showProgressFunction
         
         # Disconnect any existing sessions
         try {
@@ -65,7 +78,6 @@ function New-TenantIntune {
         
         if ($missingScopes.Count -gt 0) {
             Write-LogMessage -Message "Missing required scopes: $($missingScopes -join ', ')" -Type Error
-            Write-LogMessage -Message "Please reconnect with proper permissions" -Type Error
             return $false
         }
         
@@ -331,28 +343,6 @@ function New-DefenderPolicy {
                             children = @()
                         }
                     }
-                },
-                @{
-                    id = "1"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_allowfullscanonmappednetworkdrives"
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_defender_allowfullscanonmappednetworkdrives_1"
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "2"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_allowioavprotection"
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_defender_allowioavprotection_1"
-                            children = @()
-                        }
-                    }
                 }
             )
         }
@@ -393,28 +383,6 @@ function New-DefenderAntivirusPolicy {
                             children = @()
                         }
                     }
-                },
-                @{
-                    id = "1"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_cloudblocklevel"
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_defender_cloudblocklevel_2"
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "2"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_cloudextendedtimeout"
-                        simpleSettingValue = @{
-                            "@odata.type" = "#microsoft.graph.deviceManagementConfigurationIntegerSettingValue"
-                            value = 50
-                        }
-                    }
                 }
             )
         }
@@ -438,10 +406,6 @@ function New-BitLockerPolicy {
             description = "BitLocker drive encryption configuration"
             platforms = "windows10"
             technologies = "mdm"
-            templateReference = @{
-                templateId = ""
-                templateFamily = "none"
-            }
             settings = @(
                 @{
                     id = "0"
@@ -479,8 +443,6 @@ function New-LAPSPolicy {
             templateReference = @{
                 templateId = "adc46e5a-f4aa-4ff6-aeff-4f27bc525796_1"
                 templateFamily = "endpointSecurityAccountProtection"
-                templateDisplayName = "Local admin password solution (Windows LAPS)"
-                templateDisplayVersion = "Version 1"
             }
             settings = @(
                 @{
@@ -490,16 +452,7 @@ function New-LAPSPolicy {
                         settingDefinitionId = "device_vendor_msft_laps_policies_backupdirectory"
                         choiceSettingValue = @{
                             value = "device_vendor_msft_laps_policies_backupdirectory_1"
-                            children = @(
-                                @{
-                                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance"
-                                    settingDefinitionId = "device_vendor_msft_laps_policies_passwordagedays_aad"
-                                    simpleSettingValue = @{
-                                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationIntegerSettingValue"
-                                        value = 7
-                                    }
-                                }
-                            )
+                            children = @()
                         }
                     }
                 }
@@ -525,10 +478,6 @@ function New-OneDrivePolicy {
             description = "OneDrive for Business configuration and Known Folder Move"
             platforms = "windows10"
             technologies = "mdm"
-            templateReference = @{
-                templateId = ""
-                templateFamily = "none"
-            }
             settings = @(
                 @{
                     id = "0"
@@ -566,10 +515,6 @@ function New-EdgePolicies {
             description = "Edge browser configuration with default pages"
             platforms = "windows10"
             technologies = "mdm"
-            templateReference = @{
-                templateId = ""
-                templateFamily = "none"
-            }
             settings = @(
                 @{
                     id = "0"
@@ -606,20 +551,14 @@ function New-EdgePolicies {
 
 function Get-SharePointRootSiteUrl {
     try {
-        # First try to get from tenant state if available
         if ($script:TenantState -and $script:TenantState.DefaultDomain) {
             $domain = $script:TenantState.DefaultDomain
             $tenantName = $domain.Split('.')[0]
-            $rootUrl = "https://$tenantName.sharepoint.com"
-            return $rootUrl
+            return "https://$tenantName.sharepoint.com"
         }
-        
-        # Fallback: use default
-        Write-LogMessage -Message "Could not determine SharePoint URL, using default" -Type Warning
         return "https://www.office.com"
     }
     catch {
-        Write-LogMessage -Message "Error determining SharePoint URL - $($_.Exception.Message)" -Type Warning
         return "https://www.office.com"
     }
 }
@@ -633,10 +572,6 @@ function New-PowerOptionsPolicy {
             description = "Power management settings for devices"
             platforms = "windows10"
             technologies = "mdm"
-            templateReference = @{
-                templateId = ""
-                templateFamily = "none"
-            }
             settings = @(
                 @{
                     id = "0"
@@ -671,10 +606,6 @@ function New-AdminAccountPolicy {
             description = "Enable and configure built-in administrator account for LAPS"
             platforms = "windows10"
             technologies = "mdm"
-            templateReference = @{
-                templateId = ""
-                templateFamily = "none"
-            }
             settings = @(
                 @{
                     id = "0"
@@ -712,8 +643,6 @@ function New-FirewallPolicy {
             templateReference = @{
                 templateId = "6078910e-d808-4a9f-a51d-1b8a7bacb7c0_1"
                 templateFamily = "endpointSecurityFirewall"
-                templateDisplayName = "Windows Firewall"
-                templateDisplayVersion = "Version 1"
             }
             settings = @(
                 @{
@@ -752,8 +681,6 @@ function New-TamperProtectionPolicy {
             templateReference = @{
                 templateId = "d948ff9b-99cb-4ee0-8012-1fbc09685377_1"
                 templateFamily = "endpointSecurityAntivirus"
-                templateDisplayName = "Windows Security Experience"
-                templateDisplayVersion = "Version 1"
             }
             settings = @(
                 @{
@@ -792,8 +719,6 @@ function New-EDRPolicy {
             templateReference = @{
                 templateId = "0385b795-0f2f-44ac-8602-9f65bf6adede_1"
                 templateFamily = "endpointSecurityEndpointDetectionAndResponse"
-                templateDisplayName = "Endpoint detection and response"
-                templateDisplayVersion = "Version 1"
             }
             settings = @(
                 @{
@@ -829,10 +754,6 @@ function New-OfficePolicies {
             description = "Microsoft Office update settings"
             platforms = "windows10"
             technologies = "mdm"
-            templateReference = @{
-                templateId = ""
-                templateFamily = "none"
-            }
             settings = @(
                 @{
                     id = "0"
@@ -867,10 +788,6 @@ function New-OutlookPolicy {
             description = "Microsoft Outlook user experience settings"
             platforms = "windows10"
             technologies = "mdm"
-            templateReference = @{
-                templateId = ""
-                templateFamily = "none"
-            }
             settings = @(
                 @{
                     id = "0"
@@ -905,10 +822,6 @@ function New-UnenrollmentPolicy {
             description = "Prevent users from manually unenrolling devices from Intune"
             platforms = "windows10"
             technologies = "mdm"
-            templateReference = @{
-                templateId = ""
-                templateFamily = "none"
-            }
             settings = @(
                 @{
                     id = "0"
