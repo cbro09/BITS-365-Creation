@@ -581,21 +581,38 @@ function Start-Setup {
                 Read-Host "Press Enter to continue"
             }
             5 {
-                # Configure Intune
-                if (-not (Get-MgContext)) {
-                    Write-LogMessage -Message "Not connected to Microsoft Graph. Please connect first." -Type Warning
-                }
-                else {
-                    $moduleLoaded = Import-ModuleFromCache -ModuleName "Intune"
-                    if ($moduleLoaded) {
-                        $intuneSetup = New-TenantIntune
-                    }
-                    else {
-                        Write-LogMessage -Message "Failed to load Intune module. Please check your internet connection." -Type Error
-                    }
-                }
-                Read-Host "Press Enter to continue"
+    # Configure Intune
+    if (-not (Get-MgContext)) {
+        Write-LogMessage -Message "Not connected to Microsoft Graph. Please connect first." -Type Warning
+    }
+    else {
+        $moduleLoaded = Import-ModuleFromCache -ModuleName "Intune"
+        if ($moduleLoaded) {
+            try {
+                $functionDef = Get-Command New-TenantIntune -ErrorAction Stop
+                $intuneSetup = New-TenantIntune
             }
+            catch [System.Management.Automation.CommandNotFoundException] {
+                Write-LogMessage -Message "New-TenantIntune function not found after module load" -Type Error
+                Write-LogMessage -Message "Attempting direct execution from module file..." -Type Info
+                try {
+                    $fileName = $GitHubConfig.ModuleFiles["Intune"]
+                    $localPath = Join-Path -Path $GitHubConfig.CacheDirectory -ChildPath $fileName
+                    
+                    $result = & {
+                        . $localPath
+                        New-TenantIntune
+                    }
+                    Write-LogMessage -Message "Direct execution successful" -Type Success
+                }
+                catch {
+                    Write-LogMessage -Message "Direct execution also failed: $($_.Exception.Message)" -Type Error
+                }
+            }
+        }
+    }
+    Read-Host "Press Enter to continue"
+}
             6 {
                 # Create users
                 if (-not (Get-MgContext)) {
