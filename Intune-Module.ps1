@@ -1217,7 +1217,7 @@ function New-DefenderPolicy {
 }
 
 function New-FirewallPolicy {
-    Write-LogMessage -Message "Creating comprehensive Windows Firewall policy..." -Type Info
+    Write-LogMessage -Message "Creating Windows Firewall policy with template..." -Type Info
     
     try {
         $body = @{
@@ -1228,16 +1228,24 @@ function New-FirewallPolicy {
             templateReference = @{
                 templateId = "6078910e-d808-4a9f-a51d-1b8a7bacb7c0_1"
                 templateFamily = "endpointSecurityFirewall"
+                templateDisplayName = "Windows Firewall"
+                templateDisplayVersion = "Version 1"
             }
             settings = @(
-                # Domain Profile
                 @{
                     id = "0"
                     settingInstance = @{
                         "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
                         settingDefinitionId = "vendor_msft_firewall_mdmstore_domainprofile_enablefirewall"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "7714c373-a19a-4b64-ba6d-2e9db04a7684"
+                        }
                         choiceSettingValue = @{
                             value = "vendor_msft_firewall_mdmstore_domainprofile_enablefirewall_true"
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "120c5dbe-0c88-46f0-b897-2c996d3e5277"
+                                useTemplateDefault = $false
+                            }
                             children = @(
                                 @{
                                     "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
@@ -1259,14 +1267,20 @@ function New-FirewallPolicy {
                         }
                     }
                 },
-                # Private Profile
                 @{
                     id = "1"
                     settingInstance = @{
                         "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
                         settingDefinitionId = "vendor_msft_firewall_mdmstore_privateprofile_enablefirewall"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "1c14f914-69bb-49f8-af5b-e29173a6ee95"
+                        }
                         choiceSettingValue = @{
                             value = "vendor_msft_firewall_mdmstore_privateprofile_enablefirewall_true"
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "9d55dfae-d55f-4f2a-af03-9a9524f61e76"
+                                useTemplateDefault = $false
+                            }
                             children = @(
                                 @{
                                     "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
@@ -1288,14 +1302,20 @@ function New-FirewallPolicy {
                         }
                     }
                 },
-                # Public Profile
                 @{
                     id = "2"
                     settingInstance = @{
                         "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
                         settingDefinitionId = "vendor_msft_firewall_mdmstore_publicprofile_enablefirewall"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "e2714734-708e-4286-8ae9-d56821e306a3"
+                        }
                         choiceSettingValue = @{
                             value = "vendor_msft_firewall_mdmstore_publicprofile_enablefirewall_true"
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "c38694c7-51a4-4a35-8f64-b10866a04776"
+                                useTemplateDefault = $false
+                            }
                             children = @(
                                 @{
                                     "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
@@ -1321,7 +1341,7 @@ function New-FirewallPolicy {
         }
         
         $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" -Body $body
-        Write-LogMessage -Message "Created comprehensive Windows Firewall policy with 3 network profiles" -Type Success
+        Write-LogMessage -Message "Created Windows Firewall policy with template references" -Type Success
         return $result
     }
     catch {
@@ -1342,6 +1362,8 @@ function New-TamperProtectionPolicy {
             templateReference = @{
                 templateId = "d948ff9b-99cb-4ee0-8012-1fbc09685377_1"
                 templateFamily = "endpointSecurityAntivirus"
+                templateDisplayName = "Windows Security Experience"
+                templateDisplayVersion = "Version 1"
             }
             settings = @(
                 @{
@@ -1349,8 +1371,15 @@ function New-TamperProtectionPolicy {
                     settingInstance = @{
                         "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
                         settingDefinitionId = "vendor_msft_defender_configuration_tamperprotection_options"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "5655cab2-7e6b-4c49-9ce2-3865da05f7e6"
+                        }
                         choiceSettingValue = @{
                             value = "vendor_msft_defender_configuration_tamperprotection_options_0"
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "fc365da9-2c1b-4f79-aa4b-dedca69e728f"
+                                useTemplateDefault = $false
+                            }
                             children = @()
                         }
                     }
@@ -1373,13 +1402,15 @@ function New-EDRPolicy {
     
     try {
         $body = @{
-            name = "EDR Configuration"
+            name = "EDR Policy"
             description = "Endpoint Detection and Response configuration"
             platforms = "windows10"
             technologies = "mdm,microsoftSense"
             templateReference = @{
                 templateId = "0385b795-0f2f-44ac-8602-9f65bf6adede_1"
                 templateFamily = "endpointSecurityEndpointDetectionAndResponse"
+                templateDisplayName = "Endpoint detection and response"
+                templateDisplayVersion = "Version 1"
             }
             settings = @(
                 @{
@@ -1387,8 +1418,43 @@ function New-EDRPolicy {
                     settingInstance = @{
                         "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
                         settingDefinitionId = "device_vendor_msft_windowsadvancedthreatprotection_configurationtype"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "23ab0ea3-1b12-429a-8ed0-7390cf699160"
+                        }
                         choiceSettingValue = @{
                             value = "device_vendor_msft_windowsadvancedthreatprotection_configurationtype_autofromconnector"
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "e5c7c98c-c854-4140-836e-bd22db59d651"
+                                useTemplateDefault = $false
+                            }
+                            children = @(
+                                @{
+                                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance"
+                                    settingDefinitionId = "device_vendor_msft_windowsadvancedthreatprotection_onboarding_fromconnector"
+                                    simpleSettingValue = @{
+                                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationSecretSettingValue"
+                                        value = "f72b3368-a08e-4567-8ba7-76e29686583f"
+                                        valueState = "encryptedValueToken"
+                                    }
+                                }
+                            )
+                        }
+                    }
+                },
+                @{
+                    id = "1"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                        settingDefinitionId = "device_vendor_msft_windowsadvancedthreatprotection_configuration_samplesharing"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "6998c81e-2814-4f5e-b492-a6159128a97b"
+                        }
+                        choiceSettingValue = @{
+                            value = "device_vendor_msft_windowsadvancedthreatprotection_configuration_samplesharing_1"
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "f72c326c-7c5b-4224-b890-0b9b54522bd9"
+                                useTemplateDefault = $false
+                            }
                             children = @()
                         }
                     }
@@ -1407,7 +1473,7 @@ function New-EDRPolicy {
 }
 
 function New-LAPSPolicy {
-    Write-LogMessage -Message "Creating comprehensive LAPS policy with 6 settings..." -Type Info
+    Write-LogMessage -Message "Creating LAPS policy with correct template..." -Type Info
     
     try {
         $body = @{
@@ -1418,16 +1484,24 @@ function New-LAPSPolicy {
             templateReference = @{
                 templateId = "adc46e5a-f4aa-4ff6-aeff-4f27bc525796_1"
                 templateFamily = "endpointSecurityAccountProtection"
+                templateDisplayName = "Local admin password solution (Windows LAPS)"
+                templateDisplayVersion = "Version 1"
             }
             settings = @(
-                # Backup Directory
                 @{
                     id = "0"
                     settingInstance = @{
                         "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
                         settingDefinitionId = "device_vendor_msft_laps_policies_backupdirectory"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "a3270f64-e493-499d-8900-90290f61ed8a"
+                        }
                         choiceSettingValue = @{
                             value = "device_vendor_msft_laps_policies_backupdirectory_1"
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "4d90f03d-e14c-43c4-86da-681da96a2f92"
+                                useTemplateDefault = $false
+                            }
                             children = @(
                                 @{
                                     "@odata.type" = "#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance"
@@ -1441,63 +1515,93 @@ function New-LAPSPolicy {
                         }
                     }
                 },
-                # Administrator Account Name
                 @{
                     id = "1"
                     settingInstance = @{
                         "@odata.type" = "#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance"
                         settingDefinitionId = "device_vendor_msft_laps_policies_administratoraccountname"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "d3d7d492-0019-4f56-96f8-1967f7deabeb"
+                        }
                         simpleSettingValue = @{
                             "@odata.type" = "#microsoft.graph.deviceManagementConfigurationStringSettingValue"
                             value = "palocal"
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "992c7fce-f9e4-46ab-ac11-e167398859ea"
+                                useTemplateDefault = $false
+                            }
                         }
                     }
                 },
-                # Password Complexity
                 @{
                     id = "2"
                     settingInstance = @{
                         "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
                         settingDefinitionId = "device_vendor_msft_laps_policies_passwordcomplexity"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "8a7459e8-1d1c-458a-8906-7b27d216de52"
+                        }
                         choiceSettingValue = @{
                             value = "device_vendor_msft_laps_policies_passwordcomplexity_3"
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "aa883ab5-625e-4e3b-b830-a37a4bb8ce01"
+                                useTemplateDefault = $false
+                            }
                             children = @()
                         }
                     }
                 },
-                # Password Length
                 @{
                     id = "3"
                     settingInstance = @{
                         "@odata.type" = "#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance"
                         settingDefinitionId = "device_vendor_msft_laps_policies_passwordlength"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "da7a1dbd-caf7-4341-ab63-ece6f994ff02"
+                        }
                         simpleSettingValue = @{
                             "@odata.type" = "#microsoft.graph.deviceManagementConfigurationIntegerSettingValue"
                             value = 20
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "d08f1266-5345-4f53-8ae1-4c20e6cb5ec9"
+                                useTemplateDefault = $false
+                            }
                         }
                     }
                 },
-                # Post Authentication Actions
                 @{
                     id = "4"
                     settingInstance = @{
                         "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
                         settingDefinitionId = "device_vendor_msft_laps_policies_postauthenticationactions"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "d9282eb1-d187-42ae-b366-7081f32dcfff"
+                        }
                         choiceSettingValue = @{
                             value = "device_vendor_msft_laps_policies_postauthenticationactions_3"
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "68ff4f78-baa8-4b32-bf3d-5ad5566d8142"
+                                useTemplateDefault = $false
+                            }
                             children = @()
                         }
                     }
                 },
-                # Post Authentication Reset Delay
                 @{
                     id = "5"
                     settingInstance = @{
                         "@odata.type" = "#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance"
                         settingDefinitionId = "device_vendor_msft_laps_policies_postauthenticationresetdelay"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "a9e21166-4055-4042-9372-efaf3ef41868"
+                        }
                         simpleSettingValue = @{
                             "@odata.type" = "#microsoft.graph.deviceManagementConfigurationIntegerSettingValue"
                             value = 1
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "0deb6aee-8dac-40c4-a9dd-c3718e5c1d52"
+                                useTemplateDefault = $false
+                            }
                         }
                     }
                 }
@@ -1505,7 +1609,7 @@ function New-LAPSPolicy {
         }
         
         $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" -Body $body
-        Write-LogMessage -Message "Created comprehensive LAPS policy with 6 settings" -Type Success
+        Write-LogMessage -Message "Created LAPS policy with template references" -Type Success
         return $result
     }
     catch {
