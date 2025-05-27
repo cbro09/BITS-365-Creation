@@ -1,28 +1,63 @@
-# === Intune.ps1 ===
-# Microsoft Intune configuration and policy management functions
-
 function New-TenantIntune {
     Write-LogMessage -Message "Starting Intune configuration..." -Type Info
-    Import-RequiredGraphModules
     
-    # Verify Graph connection
+    # COMPLETE module reset to match working user script exactly
     try {
-        $context = Get-MgContext -ErrorAction Stop
-        if (-not $context) {
-            Write-LogMessage -Message "Not connected to Microsoft Graph. Please connect first." -Type Error
-            return $false
+        # Remove ALL Graph modules first to avoid conflicts
+        Write-LogMessage -Message "Clearing all Graph modules to prevent conflicts..." -Type Info
+        Get-Module Microsoft.Graph* | Remove-Module -Force -ErrorAction SilentlyContinue
+        
+        # Disconnect any existing sessions
+        try {
+            Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+        }
+        catch {
+            # Ignore disconnect errors
         }
         
-        # Check required scopes
-        $requiredScopes = @(
+        # Force load ONLY the exact modules needed for Intune in exact order
+        $intuneModules = @(
+            'Microsoft.Graph.DeviceManagement',
+            'Microsoft.Graph.Groups', 
+            'Microsoft.Graph.Identity.DirectoryManagement'
+        )
+        
+        Write-LogMessage -Message "Loading ONLY Intune modules in exact order..." -Type Info
+        foreach ($module in $intuneModules) {
+            try {
+                # Remove any existing version first
+                Get-Module $module | Remove-Module -Force -ErrorAction SilentlyContinue
+                
+                # Import fresh
+                Import-Module -Name $module -Force -ErrorAction Stop
+                $moduleInfo = Get-Module $module
+                Write-LogMessage -Message "Loaded $module version $($moduleInfo.Version)" -Type Success -LogOnly
+            }
+            catch {
+                Write-LogMessage -Message "Failed to load $module module - $($_.Exception.Message)" -Type Error
+                return $false
+            }
+        }
+        
+        # Connect with EXACT scopes needed for Intune
+        $intuneScopes = @(
             "DeviceManagementConfiguration.ReadWrite.All",
             "DeviceManagementManagedDevices.ReadWrite.All", 
+            "DeviceManagementApps.ReadWrite.All",
             "Group.ReadWrite.All",
             "Directory.ReadWrite.All"
         )
         
+        Write-LogMessage -Message "Connecting to Microsoft Graph with Intune scopes only..." -Type Info
+        Connect-MgGraph -Scopes $intuneScopes -ErrorAction Stop | Out-Null
+        
+        $context = Get-MgContext
+        Write-LogMessage -Message "Connected to Microsoft Graph as $($context.Account)" -Type Success
+        Write-LogMessage -Message "Active scopes: $($context.Scopes -join ', ')" -Type Info -LogOnly
+        
+        # Verify required scopes are present
         $missingScopes = @()
-        foreach ($scope in $requiredScopes) {
+        foreach ($scope in $intuneScopes) {
             if ($context.Scopes -notcontains $scope) {
                 $missingScopes += $scope
             }
@@ -35,13 +70,7 @@ function New-TenantIntune {
         }
         
         Write-LogMessage -Message "Graph connection verified with required scopes" -Type Success
-    }
-    catch {
-        Write-LogMessage -Message "Graph connection verification failed - $($_.Exception.Message)" -Type Error
-        return $false
-    }
-    
-    try {
+        
         # Create WindowsAutoPilot dynamic group first
         $autopilotGroup = New-WindowsAutoPilotGroup
         if (-not $autopilotGroup) {
@@ -239,17 +268,6 @@ function New-WindowsUpdateRings {
             }
         }
         
-        # Try to assign users to device groups based on Excel data
-        try {
-            $userAssignments = Get-UpdateRingUserAssignments
-            if ($userAssignments) {
-                Assign-UsersToDeviceGroups -UserAssignments $userAssignments
-            }
-        }
-        catch {
-            Write-LogMessage -Message "Could not assign users to device groups - manual assignment required" -Type Warning
-        }
-        
         return $true
     }
     catch {
@@ -257,88 +275,6 @@ function New-WindowsUpdateRings {
         return $false
     }
 }
-
-function Get-UpdateRingUserAssignments {
-    # Try to find Excel file and read user assignments from row 39
-    $defaultExcelPath = "$env:USERPROFILE\Documents\users.xlsx"
-    
-    if (Test-Path -Path $defaultExcelPath) {
-        try {
-            $updateData = Import-Excel -Path $defaultExcelPath -WorksheetName "Windows Updates" -StartRow 39 -EndRow 39
-            
-            if ($updateData -and $updateData.Count -gt 0) {
-                $assignments = @{
-                    Ring0 = @()
-                    Ring1 = @()
-                    Ring2 = @()
-                }
-                
-                # Parse user assignments from columns D, F, H
-                $row = $updateData[0]
-                
-                if ($row.PSObject.Properties.Name -contains 'D' -and $row.D) {
-                    $assignments.Ring0 = $row.D -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }
-                }
-                
-                if ($row.PSObject.Properties.Name -contains 'F' -and $row.F) {
-                    $assignments.Ring1 = $row.F -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }
-                }
-                
-                if ($row.PSObject.Properties.Name -contains 'H' -and $row.H) {
-                    $assignments.Ring2 = $row.H -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }
-                }
-                
-                return $assignments
-            }
-        }
-        catch {
-            Write-LogMessage -Message "Could not read update ring assignments from Excel - $($_.Exception.Message)" -Type Warning
-        }
-    }
-    
-    return $null
-}
-
-function Assign-UsersToDeviceGroups {
-    param (
-        [hashtable]$UserAssignments
-    )
-    
-    $groupMappings = @{
-        "Ring0" = "WindowsDeviceRing0"
-        "Ring1" = "WindowsDeviceRing1" 
-        "Ring2" = "WindowsDeviceRing2"
-    }
-    
-    foreach ($ring in $UserAssignments.Keys) {
-        $groupName = $groupMappings[$ring]
-        $users = $UserAssignments[$ring]
-        
-        if ($users.Count -gt 0 -and $script:TenantState.CreatedGroups.ContainsKey($groupName)) {
-            $groupId = $script:TenantState.CreatedGroups[$groupName]
-            
-            foreach ($userEmail in $users) {
-                try {
-                    $user = Get-MgUser -Filter "userPrincipalName eq '$userEmail'" -ErrorAction Stop
-                    
-                    if ($user) {
-                        $memberBody = @{
-                            "@odata.id" = "https://graph.microsoft.com/v1.0/users/$($user.Id)"
-                        }
-                        
-                        Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/v1.0/groups/$groupId/members/`$ref" -Body $memberBody
-                        Write-LogMessage -Message "Added $userEmail to $groupName" -Type Success
-                    }
-                }
-                catch {
-                    Write-LogMessage -Message "Failed to add $userEmail to $groupName - $($_.Exception.Message)" -Type Warning
-                }
-            }
-        }
-    }
-}
-
-# === Prerequisite Functions ===
 
 function Enable-WindowsLAPS {
     Write-LogMessage -Message "Checking Windows LAPS prerequisite..." -Type Info
@@ -417,50 +353,6 @@ function New-DefenderPolicy {
                             children = @()
                         }
                     }
-                },
-                @{
-                    id = "3"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_avgcpuloadfactor"
-                        simpleSettingValue = @{
-                            "@odata.type" = "#microsoft.graph.deviceManagementConfigurationIntegerSettingValue"
-                            value = 25
-                        }
-                    }
-                },
-                @{
-                    id = "4"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_checkforsignaturesbeforerunningscan"
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_defender_checkforsignaturesbeforerunningscan_1"
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "5"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_cloudblocklevel"
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_defender_cloudblocklevel_0"
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "6"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_allowemailscanning"
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_defender_allowemailscanning_1"
-                            children = @()
-                        }
-                    }
                 }
             )
         }
@@ -523,28 +415,6 @@ function New-DefenderAntivirusPolicy {
                             value = 50
                         }
                     }
-                },
-                @{
-                    id = "3"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_enablenetworkprotection"
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_defender_enablenetworkprotection_1"
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "4"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_allowrealtimemonitoring"
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_defender_allowrealtimemonitoring_1"
-                            children = @()
-                        }
-                    }
                 }
             )
         }
@@ -581,46 +451,6 @@ function New-BitLockerPolicy {
                         choiceSettingValue = @{
                             value = "device_vendor_msft_bitlocker_requiredeviceencryption_1"
                             children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "1"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_bitlocker_allowwarningforotherdiskencryption"
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_bitlocker_allowwarningforotherdiskencryption_0"
-                            children = @(
-                                @{
-                                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                                    settingDefinitionId = "device_vendor_msft_bitlocker_allowstandarduserencryption"
-                                    choiceSettingValue = @{
-                                        value = "device_vendor_msft_bitlocker_allowstandarduserencryption_1"
-                                        children = @()
-                                    }
-                                }
-                            )
-                        }
-                    }
-                },
-                @{
-                    id = "2"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_bitlocker_encryptionmethodbydrivetype"
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_bitlocker_encryptionmethodbydrivetype_1"
-                            children = @(
-                                @{
-                                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                                    settingDefinitionId = "device_vendor_msft_bitlocker_encryptionmethodbydrivetype_encryptionmethodwithxtsosdropdown_name"
-                                    choiceSettingValue = @{
-                                        value = "device_vendor_msft_bitlocker_encryptionmethodbydrivetype_encryptionmethodwithxtsosdropdown_name_7"
-                                        children = @()
-                                    }
-                                }
-                            )
                         }
                     }
                 }
@@ -672,39 +502,6 @@ function New-LAPSPolicy {
                             )
                         }
                     }
-                },
-                @{
-                    id = "1"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_laps_policies_administratoraccountname"
-                        simpleSettingValue = @{
-                            "@odata.type" = "#microsoft.graph.deviceManagementConfigurationStringSettingValue"
-                            value = "LocalAdmin"
-                        }
-                    }
-                },
-                @{
-                    id = "2"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_laps_policies_passwordcomplexity"
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_laps_policies_passwordcomplexity_3"
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "3"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_laps_policies_passwordlength"
-                        simpleSettingValue = @{
-                            "@odata.type" = "#microsoft.graph.deviceManagementConfigurationIntegerSettingValue"
-                            value = 20
-                        }
-                    }
                 }
             )
         }
@@ -740,50 +537,6 @@ function New-OneDrivePolicy {
                         settingDefinitionId = "user_vendor_msft_policy_config_onedrivengscv2~policy~onedrivengsc_disablepauseonmeterednetwork"
                         choiceSettingValue = @{
                             value = "user_vendor_msft_policy_config_onedrivengscv2~policy~onedrivengsc_disablepauseonmeterednetwork_1"
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "1"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_onedrivengscv2~policy~onedrivengsc_kfmblockoptout"
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_onedrivengscv2~policy~onedrivengsc_kfmblockoptout_1"
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "2"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "user_vendor_msft_policy_config_onedrivengscv2~policy~onedrivengsc_disablepersonalsync"
-                        choiceSettingValue = @{
-                            value = "user_vendor_msft_policy_config_onedrivengscv2~policy~onedrivengsc_disablepersonalsync_1"
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "3"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_onedrivengscv2~policy~onedrivengsc_silentaccountconfig"
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_onedrivengscv2~policy~onedrivengsc_silentaccountconfig_1"
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "4"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_onedrivengscv2~policy~onedrivengsc_filesondemandenabled"
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_onedrivengscv2~policy~onedrivengsc_filesondemandenabled_1"
                             children = @()
                         }
                     }
@@ -837,28 +590,6 @@ function New-EdgePolicies {
                             )
                         }
                     }
-                },
-                @{
-                    id = "1"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_microsoft_edge~policy~microsoft_edge~startup_restoreonstartupurls"
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_microsoft_edge~policy~microsoft_edge~startup_restoreonstartupurls_1"
-                            children = @(
-                                @{
-                                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationSimpleSettingCollectionInstance"
-                                    settingDefinitionId = "device_vendor_msft_policy_config_microsoft_edge~policy~microsoft_edge~startup_restoreonstartupurls_restoreonstartupurlsdesc"
-                                    simpleSettingCollectionValue = @(
-                                        @{
-                                            "@odata.type" = "#microsoft.graph.deviceManagementConfigurationStringSettingValue"
-                                            value = $sharePointUrl
-                                        }
-                                    )
-                                }
-                            )
-                        }
-                    }
                 }
             )
         }
@@ -880,29 +611,12 @@ function Get-SharePointRootSiteUrl {
             $domain = $script:TenantState.DefaultDomain
             $tenantName = $domain.Split('.')[0]
             $rootUrl = "https://$tenantName.sharepoint.com"
-            
-            # Test if the URL is accessible
-            try {
-                $testResult = Invoke-WebRequest -Uri $rootUrl -Method Head -ErrorAction Stop
-                Write-LogMessage -Message "Found SharePoint root site: $rootUrl" -Type Success
-                return $rootUrl
-            }
-            catch {
-                Write-LogMessage -Message "Could not access constructed SharePoint URL: $rootUrl" -Type Warning
-            }
+            return $rootUrl
         }
         
-        # Fallback: prompt user for SharePoint URL
-        Write-Host "Could not automatically determine SharePoint root site URL." -ForegroundColor Yellow
-        $sharePointUrl = Read-Host "Please enter your SharePoint root site URL (e.g., https://contoso.sharepoint.com)"
-        
-        if ($sharePointUrl -and $sharePointUrl.StartsWith("https://")) {
-            return $sharePointUrl
-        }
-        else {
-            Write-LogMessage -Message "Invalid SharePoint URL provided, using default" -Type Warning
-            return "https://www.office.com"
-        }
+        # Fallback: use default
+        Write-LogMessage -Message "Could not determine SharePoint URL, using default" -Type Warning
+        return "https://www.office.com"
     }
     catch {
         Write-LogMessage -Message "Error determining SharePoint URL - $($_.Exception.Message)" -Type Warning
@@ -932,28 +646,6 @@ function New-PowerOptionsPolicy {
                         choiceSettingValue = @{
                             value = "device_vendor_msft_policy_config_power_allowhibernate_1"
                             children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "1"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"  
-                        settingDefinitionId = "device_vendor_msft_policy_config_power_selectlidcloseactionpluggedin"
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_power_selectlidcloseactionpluggedin_1"
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "2"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_power_unattendedsleeptimeoutpluggedin"
-                        simpleSettingValue = @{
-                            "@odata.type" = "#microsoft.graph.deviceManagementConfigurationIntegerSettingValue"
-                            value = 900
                         }
                     }
                 }
@@ -994,17 +686,6 @@ function New-AdminAccountPolicy {
                             children = @()
                         }
                     }
-                },
-                @{
-                    id = "1"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_localpoliciessecurityoptions_accounts_renameadministratoraccount"
-                        simpleSettingValue = @{
-                            "@odata.type" = "#microsoft.graph.deviceManagementConfigurationStringSettingValue"
-                            value = "LocalAdmin"
-                        }
-                    }
                 }
             )
         }
@@ -1042,56 +723,7 @@ function New-FirewallPolicy {
                         settingDefinitionId = "vendor_msft_firewall_mdmstore_domainprofile_enablefirewall"
                         choiceSettingValue = @{
                             value = "vendor_msft_firewall_mdmstore_domainprofile_enablefirewall_true"
-                            children = @(
-                                @{
-                                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                                    settingDefinitionId = "vendor_msft_firewall_mdmstore_domainprofile_defaultinboundaction"
-                                    choiceSettingValue = @{
-                                        value = "vendor_msft_firewall_mdmstore_domainprofile_defaultinboundaction_1"
-                                        children = @()
-                                    }
-                                }
-                            )
-                        }
-                    }
-                },
-                @{
-                    id = "1"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "vendor_msft_firewall_mdmstore_privateprofile_enablefirewall"
-                        choiceSettingValue = @{
-                            value = "vendor_msft_firewall_mdmstore_privateprofile_enablefirewall_true"
-                            children = @(
-                                @{
-                                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                                    settingDefinitionId = "vendor_msft_firewall_mdmstore_privateprofile_defaultinboundaction"
-                                    choiceSettingValue = @{
-                                        value = "vendor_msft_firewall_mdmstore_privateprofile_defaultinboundaction_1"
-                                        children = @()
-                                    }
-                                }
-                            )
-                        }
-                    }
-                },
-                @{
-                    id = "2"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "vendor_msft_firewall_mdmstore_publicprofile_enablefirewall"
-                        choiceSettingValue = @{
-                            value = "vendor_msft_firewall_mdmstore_publicprofile_enablefirewall_true"
-                            children = @(
-                                @{
-                                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                                    settingDefinitionId = "vendor_msft_firewall_mdmstore_publicprofile_defaultinboundaction"
-                                    choiceSettingValue = @{
-                                        value = "vendor_msft_firewall_mdmstore_publicprofile_defaultinboundaction_1"
-                                        children = @()
-                                    }
-                                }
-                            )
+                            children = @()
                         }
                     }
                 }
@@ -1174,17 +806,6 @@ function New-EDRPolicy {
                             children = @()
                         }
                     }
-                },
-                @{
-                    id = "1"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_windowsadvancedthreatprotection_configuration_samplesharing"
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_windowsadvancedthreatprotection_configuration_samplesharing_1"
-                            children = @()
-                        }
-                    }
                 }
             )
         }
@@ -1223,17 +844,6 @@ function New-OfficePolicies {
                             children = @()
                         }
                     }
-                },
-                @{
-                    id = "1"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_office16v2~policy~l_microsoftofficemachine~l_updates_l_hideenabledisableupdates"
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_office16v2~policy~l_microsoftofficemachine~l_updates_l_hideenabledisableupdates_1"
-                            children = @()
-                        }
-                    }
                 }
             )
         }
@@ -1269,17 +879,6 @@ function New-OutlookPolicy {
                         settingDefinitionId = "user_vendor_msft_policy_config_office16v2~policy~l_microsoftofficesystem~l_languagesettings~l_other_l_disablecomingsoon"
                         choiceSettingValue = @{
                             value = "user_vendor_msft_policy_config_office16v2~policy~l_microsoftofficesystem~l_languagesettings~l_other_l_disablecomingsoon_1"
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "1"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "user_vendor_msft_policy_config_outlk16v2~policy~l_microsoftofficeoutlook~l_outlookoptions~l_delegates_l_cacheothersmail"
-                        choiceSettingValue = @{
-                            value = "user_vendor_msft_policy_config_outlk16v2~policy~l_microsoftofficeoutlook~l_outlookoptions~l_delegates_l_cacheothersmail_1"
                             children = @()
                         }
                     }
