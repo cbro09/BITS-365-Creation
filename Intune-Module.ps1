@@ -79,6 +79,14 @@ function New-TenantIntune {
         
         Write-LogMessage -Message "Graph connection verified with all required permissions" -Type Success
         
+        # Optional: Clean up duplicate policies from previous runs
+        Write-Host ""
+        $cleanup = Read-Host "Would you like to check for and remove duplicate policies first? (Y/N)"
+        if ($cleanup -eq 'Y' -or $cleanup -eq 'y') {
+            $duplicatesRemoved = Remove-DuplicatePolicies
+            Write-LogMessage -Message "Cleanup completed: $duplicatesRemoved duplicates removed" -Type Info
+        }
+        
         # 1. Create WindowsAutoPilot dynamic group
         $autopilotGroup = New-WindowsAutoPilotGroup
         if (-not $autopilotGroup) {
@@ -1630,7 +1638,7 @@ function New-EdgeUpdatePolicy {
 function New-OfficePolicies {
     Write-LogMessage -Message "Creating Office configuration policy..." -Type Info
     
-    $policyName = "Office Updates"
+    $policyName = "Office Updates Configuration"
     if (Test-PolicyExists -PolicyName $policyName) {
         Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
         return @{ name = $policyName; id = "existing" }
@@ -1670,7 +1678,7 @@ function New-OfficePolicies {
 function New-OutlookPolicy {
     Write-LogMessage -Message "Creating Outlook configuration policy..." -Type Info
     
-    $policyName = "Outlook"
+    $policyName = "Outlook Configuration"
     if (Test-PolicyExists -PolicyName $policyName) {
         Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
         return @{ name = $policyName; id = "existing" }
@@ -1749,6 +1757,50 @@ function New-DisableUACPolicy {
 
 # === Helper Functions ===
 
+function Remove-DuplicatePolicies {
+    Write-LogMessage -Message "Checking for and removing duplicate policies..." -Type Info
+    
+    try {
+        $existingPolicies = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" -ErrorAction Stop
+        
+        # Group policies by name to find duplicates
+        $policyGroups = $existingPolicies.value | Group-Object -Property name
+        $duplicatesRemoved = 0
+        
+        foreach ($group in $policyGroups) {
+            if ($group.Count -gt 1) {
+                Write-LogMessage -Message "Found $($group.Count) policies named '$($group.Name)'" -Type Warning
+                
+                # Keep the first one, remove the rest
+                $policiesToRemove = $group.Group | Select-Object -Skip 1
+                
+                foreach ($policy in $policiesToRemove) {
+                    try {
+                        Invoke-MgGraphRequest -Method DELETE -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$($policy.id)" -ErrorAction Stop
+                        Write-LogMessage -Message "Removed duplicate policy: '$($policy.name)' (ID: $($policy.id))" -Type Success
+                        $duplicatesRemoved++
+                    }
+                    catch {
+                        Write-LogMessage -Message "Failed to remove duplicate policy '$($policy.name)': $($_.Exception.Message)" -Type Error
+                    }
+                }
+            }
+        }
+        
+        if ($duplicatesRemoved -gt 0) {
+            Write-LogMessage -Message "Removed $duplicatesRemoved duplicate policies" -Type Success
+        } else {
+            Write-LogMessage -Message "No duplicate policies found" -Type Info
+        }
+        
+        return $duplicatesRemoved
+    }
+    catch {
+        Write-LogMessage -Message "Error checking for duplicate policies: $($_.Exception.Message)" -Type Error
+        return 0
+    }
+}
+
 function Test-PolicyExists {
     param (
         [string]$PolicyName
@@ -1758,13 +1810,16 @@ function Test-PolicyExists {
         Write-LogMessage -Message "Checking if policy '$PolicyName' already exists..." -Type Info -LogOnly
         $existingPolicies = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" -ErrorAction Stop
         
+        # Debug: Log all existing policy names for troubleshooting
+        Write-LogMessage -Message "Found $($existingPolicies.value.Count) existing policies in tenant" -Type Info -LogOnly
         foreach ($policy in $existingPolicies.value) {
+            Write-LogMessage -Message "Existing policy: '$($policy.name)'" -Type Info -LogOnly
             if ($policy.name -eq $PolicyName) {
-                Write-LogMessage -Message "Found existing policy: $PolicyName" -Type Info -LogOnly
+                Write-LogMessage -Message "MATCH FOUND: Policy '$PolicyName' already exists with ID: $($policy.id)" -Type Info -LogOnly
                 return $true
             }
         }
-        Write-LogMessage -Message "Policy '$PolicyName' does not exist, will create" -Type Info -LogOnly
+        Write-LogMessage -Message "NO MATCH: Policy '$PolicyName' does not exist, will create" -Type Info -LogOnly
         return $false
     }
     catch {
