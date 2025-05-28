@@ -231,9 +231,9 @@ function New-WindowsUpdateRings {
     try {
         # Create device groups first
         $deviceGroups = @(
-            @{ Name = "WindowsDeviceRing0"; Description = "Windows devices - Pilot ring (0/0 day deferrals)" },
-            @{ Name = "WindowsDeviceRing1"; Description = "Windows devices - UAT ring (2/7 day deferrals)" },
-            @{ Name = "WindowsDeviceRing2"; Description = "Windows devices - Production ring (7/7 day deferrals)" }
+            @{ Name = "WindowsDeviceRing0"; Description = "Windows devices - Pilot ring with 0/0 day deferrals" },
+            @{ Name = "WindowsDeviceRing1"; Description = "Windows devices - UAT ring with 2/7 day deferrals" },
+            @{ Name = "WindowsDeviceRing2"; Description = "Windows devices - Production ring with 7/7 day deferrals" }
         )
         
         foreach ($group in $deviceGroups) {
@@ -262,14 +262,14 @@ function New-WindowsUpdateRings {
         $updateRings = @(
             @{ 
                 Name = "RING0 - Pilot"
-                Description = "Pilot testers for latest feature/quality updates"
+                Description = "Pilot testers for latest feature and quality updates"
                 QualityDeferral = 0
                 FeatureDeferral = 0
                 GroupName = "WindowsDeviceRing0"
             },
             @{ 
                 Name = "RING1 - UAT"
-                Description = "UAT testers for latest feature/quality updates"
+                Description = "UAT testers for latest feature and quality updates"
                 QualityDeferral = 2
                 FeatureDeferral = 7
                 GroupName = "WindowsDeviceRing1"
