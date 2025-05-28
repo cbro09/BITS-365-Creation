@@ -1,5 +1,5 @@
-# === Intune.ps1 ===
-# Microsoft Intune configuration and policy management functions - Complete Policies
+# === Complete Intune.ps1 ===
+# Microsoft Intune configuration and policy management functions - Complete Policies with CORRECTED Assignments
 
 function New-TenantIntune {
     <#
@@ -2480,9 +2480,98 @@ function Get-SharePointRootSiteUrl {
     }
 }
 
-function Update-ExistingPolicyAssignments {
+# === CORRECTED Policy Assignment Functions ===
+
+function Assign-PolicyToGroups {
+    <#
+    .SYNOPSIS
+    CORRECTED function to assign Intune configuration policies to groups using proper Graph API endpoints
+    
+    .DESCRIPTION
+    This function uses the correct /assign endpoint and proper request body structure
+    to assign configuration policies to Azure AD groups in Intune.
+    
+    .PARAMETER PolicyId
+    The ID of the configuration policy to assign
+    
+    .PARAMETER GroupNames
+    Array of group names to assign the policy to
+    #>
     param (
+        [Parameter(Mandatory = $true)]
+        [string]$PolicyId,
+        
+        [Parameter(Mandatory = $true)]
+        [array]$GroupNames
+    )
+    
+    try {
+        $assignments = @()
+        $assignedGroups = @()
+        
+        foreach ($groupName in $GroupNames) {
+            if ($script:TenantState.CreatedGroups.ContainsKey($groupName)) {
+                $groupId = $script:TenantState.CreatedGroups[$groupName]
+                
+                # CORRECTED: Add required ID field with generated GUID
+                $assignments += @{
+                    id = (New-Guid).Guid
+                    target = @{
+                        "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
+                        groupId = $groupId
+                    }
+                }
+                $assignedGroups += $groupName
+            }
+            else {
+                Write-LogMessage -Message "Group '$groupName' not found in created groups, skipping assignment" -Type Warning -LogOnly
+            }
+        }
+        
+        if ($assignments.Count -gt 0) {
+            $body = @{
+                assignments = $assignments
+            }
+            
+            # CORRECTED: Use /assign endpoint instead of /assignments
+            $assignUrl = "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$PolicyId/assign"
+            
+            Write-LogMessage -Message "Assigning policy $PolicyId using endpoint: $assignUrl" -Type Info -LogOnly
+            Write-LogMessage -Message "Assignment body: $($body | ConvertTo-Json -Depth 5)" -Type Info -LogOnly
+            
+            Invoke-MgGraphRequest -Method POST -Uri $assignUrl -Body $body
+            Write-LogMessage -Message "Successfully assigned policy $PolicyId to groups: $($assignedGroups -join ', ')" -Type Success
+        }
+        else {
+            Write-LogMessage -Message "No valid groups found for policy assignment" -Type Warning
+        }
+    }
+    catch {
+        Write-LogMessage -Message "Failed to assign policy $PolicyId - $($_.Exception.Message)" -Type Error
+        Write-LogMessage -Message "Full error details: $($_.Exception.ToString())" -Type Error -LogOnly
+    }
+}
+
+function Update-ExistingPolicyAssignments {
+    <#
+    .SYNOPSIS
+    CORRECTED function to update existing policy assignments using proper Graph API
+    
+    .DESCRIPTION
+    Updates existing configuration policies with new group assignments while preserving
+    existing assignments. Uses the correct /assign endpoint.
+    
+    .PARAMETER PolicyNames
+    Array of policy names to update
+    
+    .PARAMETER GroupNames
+    Array of group names to assign to the policies
+    #>
+    param (
+        [Parameter(Mandatory = $true)]
         [array]$PolicyNames,
+        
+        [Parameter(Mandatory = $true)]
         [array]$GroupNames
     )
     
@@ -2501,14 +2590,14 @@ function Update-ExistingPolicyAssignments {
             
             Write-LogMessage -Message "Updating assignments for existing policy: $policyName" -Type Info
             
-            # Get current assignments for this policy
+            # Get current assignments for this policy using CORRECTED endpoint
             $currentAssignments = @()
             try {
                 $assignmentResponse = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$($policy.id)/assignments" -ErrorAction Stop
                 $currentAssignments = $assignmentResponse.value
             }
             catch {
-                Write-LogMessage -Message "Could not retrieve current assignments for $policyName, proceeding with new assignments only" -Type Warning
+                Write-LogMessage -Message "Could not retrieve current assignments for $policyName, proceeding with new assignments only" -Type Warning -LogOnly
             }
             
             # Build list of new assignments to add
@@ -2520,6 +2609,12 @@ function Update-ExistingPolicyAssignments {
                 if ($assignment.target.'@odata.type' -eq "#microsoft.graph.groupAssignmentTarget") {
                     $existingGroupIds += $assignment.target.groupId
                 }
+                
+                # CORRECTED: Preserve existing assignments with proper structure
+                $newAssignments += @{
+                    id = if ($assignment.id) { $assignment.id } else { (New-Guid).Guid }
+                    target = $assignment.target
+                }
             }
             
             # Add new groups that aren't already assigned
@@ -2528,7 +2623,9 @@ function Update-ExistingPolicyAssignments {
                     $groupId = $script:TenantState.CreatedGroups[$groupName]
                     
                     if ($existingGroupIds -notcontains $groupId) {
+                        # CORRECTED: Add required ID field
                         $newAssignments += @{
+                            id = (New-Guid).Guid
                             target = @{
                                 "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
                                 groupId = $groupId
@@ -2545,70 +2642,24 @@ function Update-ExistingPolicyAssignments {
                 }
             }
             
-            # If we have new assignments to add, update the policy
-            if ($newAssignments.Count -gt 0) {
-                # Combine existing and new assignments
-                $allAssignments = @()
-                $allAssignments += $currentAssignments
-                $allAssignments += $newAssignments
-                
-                $body = @{
-                    assignments = $allAssignments
-                }
-                
-                # Update the policy assignments
-                Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$($policy.id)/assignments" -Body $body
-                Write-LogMessage -Message "Successfully updated assignments for policy '$policyName' (added $($newAssignments.Count) new groups)" -Type Success
+            # Update the policy assignments using CORRECTED endpoint and structure
+            $body = @{
+                assignments = $newAssignments
             }
-            else {
-                Write-LogMessage -Message "No new groups to add to policy '$policyName'" -Type Info
-            }
+            
+            # CORRECTED: Use /assign endpoint
+            $assignUrl = "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$($policy.id)/assign"
+            
+            Write-LogMessage -Message "Updating policy assignments using endpoint: $assignUrl" -Type Info -LogOnly
+            
+            Invoke-MgGraphRequest -Method POST -Uri $assignUrl -Body $body
+            Write-LogMessage -Message "Successfully updated assignments for policy '$policyName'" -Type Success
         }
     }
     catch {
         Write-LogMessage -Message "Error updating existing policy assignments: $($_.Exception.Message)" -Type Error
+        Write-LogMessage -Message "Full error details: $($_.Exception.ToString())" -Type Error -LogOnly
     }
 }
 
-function Assign-PolicyToGroups {
-    param (
-        [string]$PolicyId,
-        [array]$GroupNames
-    )
-    
-    try {
-        $assignments = @()
-        $assignedGroups = @()
-        
-        foreach ($groupName in $GroupNames) {
-            if ($script:TenantState.CreatedGroups.ContainsKey($groupName)) {
-                $groupId = $script:TenantState.CreatedGroups[$groupName]
-                $assignments += @{
-                    target = @{
-                        "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
-                        groupId = $groupId
-                    }
-                }
-                $assignedGroups += $groupName
-            }
-            else {
-                Write-LogMessage -Message "Group '$groupName' not found in created groups, skipping assignment" -Type Warning -LogOnly
-            }
-        }
-        
-        if ($assignments.Count -gt 0) {
-            $body = @{
-                assignments = $assignments
-            }
-            
-            Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$PolicyId/assignments" -Body $body
-            Write-LogMessage -Message "Assigned policy $PolicyId to groups: $($assignedGroups -join ', ')" -Type Success
-        }
-        else {
-            Write-LogMessage -Message "No valid groups found for policy assignment" -Type Warning
-        }
-    }
-    catch {
-        Write-LogMessage -Message "Failed to assign policy $PolicyId - $($_.Exception.Message)" -Type Warning
-    }
-}
+Write-LogMessage -Message "Complete corrected Intune script loaded - use New-TenantIntune to run" -Type Info
