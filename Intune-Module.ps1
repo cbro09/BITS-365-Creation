@@ -81,7 +81,7 @@ function New-TenantIntune {
             Write-LogMessage -Message "LAPS enablement failed - LAPS policies may not work correctly" -Type Warning
         }
         
-        # Create all configuration policies with complete settings
+        # Create all configuration policies with complete settings and existence checks
         Write-LogMessage -Message "Creating comprehensive configuration policies..." -Type Info
         $policies = @()
         
@@ -116,7 +116,7 @@ function New-TenantIntune {
         # Assign policies to device groups
         $deviceGroups = @("WindowsDeviceRing0", "WindowsDeviceRing1", "WindowsDeviceRing2")
         foreach ($policy in $policies) {
-            if ($policy -and $policy.id) {
+            if ($policy -and $policy.id -and $policy.id -ne "existing") {
                 Assign-PolicyToGroups -PolicyId $policy.id -GroupNames $deviceGroups
             }
         }
@@ -223,6 +223,20 @@ function New-WindowsUpdateRings {
         )
         
         foreach ($ring in $updateRings) {
+            # Check if update ring already exists
+            try {
+                $existingRings = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/beta/deviceManagement/windowsUpdateForBusinessRings" -ErrorAction Stop
+                $existingRing = $existingRings.value | Where-Object { $_.displayName -eq $ring.Name }
+                
+                if ($existingRing) {
+                    Write-LogMessage -Message "Update ring already exists: $($ring.Name)" -Type Warning
+                    continue
+                }
+            }
+            catch {
+                Write-LogMessage -Message "Error checking existing update rings, proceeding with creation..." -Type Warning
+            }
+            
             $ringBody = @{
                 displayName = $ring.Name
                 description = $ring.Description
@@ -303,14 +317,20 @@ function Enable-WindowsLAPS {
     }
 }
 
-# === Complete Policy Creation Functions ===
+# === Complete Policy Creation Functions with Existence Checks ===
 
 function New-PowerOptionsPolicy {
     Write-LogMessage -Message "Creating complete Power Options policy..." -Type Info
     
+    $policyName = "Power Options"
+    if (Test-PolicyExists -PolicyName $policyName) {
+        Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
+        return @{ name = $policyName; id = "existing" }
+    }
+    
     try {
         $body = @{
-            name = "Power Options"
+            name = $policyName
             description = "Comprehensive power management settings for devices"
             platforms = "windows10"
             technologies = "mdm"
@@ -405,88 +425,510 @@ function New-PowerOptionsPolicy {
 }
 
 function New-DefenderAntivirusPolicy {
-    Write-LogMessage -Message "Creating comprehensive Defender Antivirus policy..." -Type Info
+    Write-LogMessage -Message "Creating comprehensive Defender Antivirus policy with 27 settings..." -Type Info
+    
+    $policyName = "NGP Windows default policy"
+    if (Test-PolicyExists -PolicyName $policyName) {
+        Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
+        return @{ name = $policyName; id = "existing" }
+    }
     
     try {
         $body = @{
-            name = "Defender Antivirus Policy"
-            description = "Microsoft Defender Antivirus comprehensive configuration"
+            name = $policyName
+            description = "Default policy sets settings for all endpoints that are not governed by any other policy, ensuring that all your clients are managed as soon as MDE is deployed. The default policy is based on a set of pre-configured recommended settings and can be adjusted by user with admin priviledges."
             platforms = "windows10"
             technologies = "mdm,microsoftSense"
             templateReference = @{
                 templateId = "804339ad-1553-4478-a742-138fb5807418_1"
                 templateFamily = "endpointSecurityAntivirus"
+                templateDisplayName = "Microsoft Defender Antivirus"
+                templateDisplayVersion = "Version 1"
             }
             settings = @(
-                # PUA Protection
                 @{
                     id = "0"
                     settingInstance = @{
                         "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
                         settingDefinitionId = "device_vendor_msft_policy_config_defender_puaprotection"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "c0135c2a-f802-44f4-9b71-b0b976411b8c"
+                        }
                         choiceSettingValue = @{
                             value = "device_vendor_msft_policy_config_defender_puaprotection_1"
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "2d790211-18cb-4e32-b8cc-97407e2c0b45"
+                                useTemplateDefault = $false
+                            }
                             children = @()
                         }
                     }
                 },
-                # Real-time Protection
                 @{
                     id = "1"
                     settingInstance = @{
                         "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_allowrealtimemonitoring"
+                        settingDefinitionId = "device_vendor_msft_policy_config_defender_cloudblocklevel"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "c7a37009-c16e-4145-84c8-89a8c121fb15"
+                        }
                         choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_defender_allowrealtimemonitoring_1"
+                            value = "device_vendor_msft_policy_config_defender_cloudblocklevel_2"
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "517b4e84-e933-42b9-b92f-00e640b1a82d"
+                                useTemplateDefault = $false
+                            }
                             children = @()
                         }
                     }
                 },
-                # Cloud Protection
                 @{
                     id = "2"
                     settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_allowcloudprotection"
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_defender_allowcloudprotection_1"
-                            children = @()
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance"
+                        settingDefinitionId = "device_vendor_msft_policy_config_defender_cloudextendedtimeout"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "f61c2788-14e4-4e80-a5a7-bf2ff5052f63"
+                        }
+                        simpleSettingValue = @{
+                            "@odata.type" = "#microsoft.graph.deviceManagementConfigurationIntegerSettingValue"
+                            value = 50
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "608f1561-b603-46bd-bf5f-0b9872002f75"
+                                useTemplateDefault = $false
+                            }
                         }
                     }
                 },
-                # Sample Submission
                 @{
                     id = "3"
                     settingInstance = @{
                         "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_submitsamplesconsent"
+                        settingDefinitionId = "device_vendor_msft_policy_config_defender_enablenetworkprotection"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "f53ab20e-8af6-48f5-9fa1-46863e1e517e"
+                        }
                         choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_defender_submitsamplesconsent_1"
+                            value = "device_vendor_msft_policy_config_defender_enablenetworkprotection_1"
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "ee58fb51-9ae5-408b-9406-b92b643f388a"
+                                useTemplateDefault = $false
+                            }
                             children = @()
                         }
                     }
                 },
-                # Scan Schedule - Daily
                 @{
                     id = "4"
                     settingInstance = @{
                         "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_schedulescanday"
+                        settingDefinitionId = "device_vendor_msft_policy_config_defender_allowrealtimemonitoring"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "f0790e28-9231-4d37-8f44-84bb47ca1b3e"
+                        }
                         choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_defender_schedulescanday_0"
+                            value = "device_vendor_msft_policy_config_defender_allowrealtimemonitoring_1"
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "0492c452-1069-4b91-9363-93b8e006ab12"
+                                useTemplateDefault = $false
+                            }
                             children = @()
                         }
                     }
                 },
-                # Scan Time - 2 AM
                 @{
                     id = "5"
                     settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                        settingDefinitionId = "device_vendor_msft_policy_config_defender_schedulescanday"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "087d3362-7e78-4983-96bc-1f4ea183f0e4"
+                        }
+                        choiceSettingValue = @{
+                            value = "device_vendor_msft_policy_config_defender_schedulescanday_2"
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "7f4d9dda-6d48-4353-90ca-9fa7164c7215"
+                                useTemplateDefault = $false
+                            }
+                            children = @()
+                        }
+                    }
+                },
+                @{
+                    id = "6"
+                    settingInstance = @{
                         "@odata.type" = "#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_schedulescantime"
+                        settingDefinitionId = "device_vendor_msft_policy_config_defender_schedulequickscantime"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "784a4af1-33fa-45f2-b945-138b7ff3bcb6"
+                        }
                         simpleSettingValue = @{
                             "@odata.type" = "#microsoft.graph.deviceManagementConfigurationIntegerSettingValue"
-                            value = 120
+                            value = 720
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "5d5c55c8-1a4e-4272-830d-8dc64cd3ac03"
+                                useTemplateDefault = $false
+                            }
+                        }
+                    }
+                },
+                @{
+                    id = "7"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                        settingDefinitionId = "device_vendor_msft_policy_config_defender_scanparameter"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "27ca2652-46f3-4cc7-83f2-bf85ff722d84"
+                        }
+                        choiceSettingValue = @{
+                            value = "device_vendor_msft_policy_config_defender_scanparameter_1"
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "70c8f42e-ee6a-4ef1-a070-cb0e9d472581"
+                                useTemplateDefault = $false
+                            }
+                            children = @()
+                        }
+                    }
+                },
+                @{
+                    id = "8"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                        settingDefinitionId = "device_vendor_msft_policy_config_defender_allowarchivescanning"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "7c5c9cde-f74d-4d11-904f-de4c27f72d89"
+                        }
+                        choiceSettingValue = @{
+                            value = "device_vendor_msft_policy_config_defender_allowarchivescanning_1"
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "9ead75d4-6f30-4bc5-8cc5-ab0f999d79f0"
+                                useTemplateDefault = $false
+                            }
+                            children = @()
+                        }
+                    }
+                },
+                @{
+                    id = "9"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                        settingDefinitionId = "device_vendor_msft_policy_config_defender_enablelowcpupriority"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "cdeb96cf-18f5-4477-a710-0ea9ecc618af"
+                        }
+                        choiceSettingValue = @{
+                            value = "device_vendor_msft_policy_config_defender_enablelowcpupriority_0"
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "045a4a13-deee-4e24-9fe4-985c9357680d"
+                                useTemplateDefault = $false
+                            }
+                            children = @()
+                        }
+                    }
+                },
+                @{
+                    id = "10"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                        settingDefinitionId = "device_vendor_msft_policy_config_defender_disablecatchupfullscan"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "f881b08c-f047-40d2-b7d9-3dde7ce9ef64"
+                        }
+                        choiceSettingValue = @{
+                            value = "device_vendor_msft_policy_config_defender_disablecatchupfullscan_0"
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "1b26092f-48c4-447b-99d4-e9c501542f1c"
+                                useTemplateDefault = $false
+                            }
+                            children = @()
+                        }
+                    }
+                },
+                @{
+                    id = "11"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                        settingDefinitionId = "device_vendor_msft_policy_config_defender_disablecatchupquickscan"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "dabf6781-9d5d-42da-822a-d4327aa2bdd1"
+                        }
+                        choiceSettingValue = @{
+                            value = "device_vendor_msft_policy_config_defender_disablecatchupquickscan_0"
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "d263ced7-0d23-4095-9326-99c8b3f5d35b"
+                                useTemplateDefault = $false
+                            }
+                            children = @()
+                        }
+                    }
+                },
+                @{
+                    id = "12"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance"
+                        settingDefinitionId = "device_vendor_msft_policy_config_defender_avgcpuloadfactor"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "816cc03e-8f96-4cba-b14f-2658d031a79a"
+                        }
+                        simpleSettingValue = @{
+                            "@odata.type" = "#microsoft.graph.deviceManagementConfigurationIntegerSettingValue"
+                            value = 50
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "37195fb1-3743-4c8e-a0ce-b6fae6fa3acd"
+                                useTemplateDefault = $false
+                            }
+                        }
+                    }
+                },
+                @{
+                    id = "13"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                        settingDefinitionId = "device_vendor_msft_policy_config_defender_allowuseruiaccess"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "0170a900-b0bc-4ccc-b7ce-dda9be49189b"
+                        }
+                        choiceSettingValue = @{
+                            value = "device_vendor_msft_policy_config_defender_allowuseruiaccess_1"
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "4b6c9739-4449-4006-8e5f-3049136470ea"
+                                useTemplateDefault = $false
+                            }
+                            children = @()
+                        }
+                    }
+                },
+                @{
+                    id = "14"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                        settingDefinitionId = "device_vendor_msft_policy_config_defender_allowcloudprotection"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "7da139f1-9b7e-407d-853a-c2e5037cdc70"
+                        }
+                        choiceSettingValue = @{
+                            value = "device_vendor_msft_policy_config_defender_allowcloudprotection_1"
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "16fe8afd-67be-4c50-8619-d535451a500c"
+                                useTemplateDefault = $false
+                            }
+                            children = @()
+                        }
+                    }
+                },
+                @{
+                    id = "15"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                        settingDefinitionId = "device_vendor_msft_policy_config_defender_realtimescandirection"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "f5ff00a4-e5c7-44cf-a650-9c7619ff1561"
+                        }
+                        choiceSettingValue = @{
+                            value = "device_vendor_msft_policy_config_defender_realtimescandirection_0"
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "6b4e3497-cfbb-4761-a152-de935bbf3f07"
+                                useTemplateDefault = $false
+                            }
+                            children = @()
+                        }
+                    }
+                },
+                @{
+                    id = "16"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                        settingDefinitionId = "device_vendor_msft_policy_config_defender_allowbehaviormonitoring"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "8eef615a-1aa0-46f4-a25a-12cbe65de5ab"
+                        }
+                        choiceSettingValue = @{
+                            value = "device_vendor_msft_policy_config_defender_allowbehaviormonitoring_1"
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "905921da-95e2-4a10-9e30-fe5540002ce1"
+                                useTemplateDefault = $false
+                            }
+                            children = @()
+                        }
+                    }
+                },
+                @{
+                    id = "17"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                        settingDefinitionId = "device_vendor_msft_policy_config_defender_allowioavprotection"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "fa06231d-aed4-4601-b631-3a37e85b62a0"
+                        }
+                        choiceSettingValue = @{
+                            value = "device_vendor_msft_policy_config_defender_allowioavprotection_1"
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "df4e6cbd-f7ff-41c8-88cd-fa25264a237e"
+                                useTemplateDefault = $false
+                            }
+                            children = @()
+                        }
+                    }
+                },
+                @{
+                    id = "18"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                        settingDefinitionId = "device_vendor_msft_policy_config_defender_allowscriptscanning"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "000cf176-949c-4c08-a5d4-90ed43718db7"
+                        }
+                        choiceSettingValue = @{
+                            value = "device_vendor_msft_policy_config_defender_allowscriptscanning_1"
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "ab9e4320-c953-4067-ac9a-be2becd06b4a"
+                                useTemplateDefault = $false
+                            }
+                            children = @()
+                        }
+                    }
+                },
+                @{
+                    id = "19"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                        settingDefinitionId = "device_vendor_msft_policy_config_defender_allowscanningnetworkfiles"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "f8f28442-0a6b-4b52-b42c-d31d9687c1cf"
+                        }
+                        choiceSettingValue = @{
+                            value = "device_vendor_msft_policy_config_defender_allowscanningnetworkfiles_1"
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "7b8c858c-a17d-4623-9e20-f34b851670ce"
+                                useTemplateDefault = $false
+                            }
+                            children = @()
+                        }
+                    }
+                },
+                @{
+                    id = "20"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                        settingDefinitionId = "device_vendor_msft_policy_config_defender_allowemailscanning"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "b0d9ee81-de6a-4750-86d7-9397961c9852"
+                        }
+                        choiceSettingValue = @{
+                            value = "device_vendor_msft_policy_config_defender_allowemailscanning_0"
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "fdf107fd-e13b-4507-9d8f-db4d93476af9"
+                                useTemplateDefault = $false
+                            }
+                            children = @()
+                        }
+                    }
+                },
+                @{
+                    id = "21"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance"
+                        settingDefinitionId = "device_vendor_msft_policy_config_defender_daystoretaincleanedmalware"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "6f6d741c-1186-42e2-b2f2-8582febcfd60"
+                        }
+                        simpleSettingValue = @{
+                            "@odata.type" = "#microsoft.graph.deviceManagementConfigurationIntegerSettingValue"
+                            value = 0
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "214b6feb-c9b2-4a17-af54-d51c805473e4"
+                                useTemplateDefault = $false
+                            }
+                        }
+                    }
+                },
+                @{
+                    id = "22"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                        settingDefinitionId = "device_vendor_msft_policy_config_defender_submitsamplesconsent"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "bc47ce7d-a251-4cae-a8a2-6e8384904ab7"
+                        }
+                        choiceSettingValue = @{
+                            value = "device_vendor_msft_policy_config_defender_submitsamplesconsent_1"
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "826ed4b6-e04f-4975-9d23-6f0904b0d87e"
+                                useTemplateDefault = $false
+                            }
+                            children = @()
+                        }
+                    }
+                },
+                @{
+                    id = "23"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                        settingDefinitionId = "device_vendor_msft_policy_config_defender_allowfullscanonmappednetworkdrives"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "dac47505-f072-48d6-9f23-8d93262d58ed"
+                        }
+                        choiceSettingValue = @{
+                            value = "device_vendor_msft_policy_config_defender_allowfullscanonmappednetworkdrives_0"
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "3e920b10-3773-4ac5-957e-e5573aec6d04"
+                                useTemplateDefault = $false
+                            }
+                            children = @()
+                        }
+                    }
+                },
+                @{
+                    id = "24"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                        settingDefinitionId = "device_vendor_msft_policy_config_defender_allowfullscanremovabledrivescanning"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "fb36e70b-5bc9-488a-a949-8ea3ac1634d5"
+                        }
+                        choiceSettingValue = @{
+                            value = "device_vendor_msft_policy_config_defender_allowfullscanremovabledrivescanning_1"
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "366c5727-629b-4a81-b50b-52f90282fa2c"
+                                useTemplateDefault = $false
+                            }
+                            children = @()
+                        }
+                    }
+                },
+                @{
+                    id = "25"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                        settingDefinitionId = "device_vendor_msft_policy_config_defender_checkforsignaturesbeforerunningscan"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "4fea56e3-7bb6-4ad3-88c6-e364dd2f97b9"
+                        }
+                        choiceSettingValue = @{
+                            value = "device_vendor_msft_policy_config_defender_checkforsignaturesbeforerunningscan_1"
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "010779d1-edd4-441d-8034-89ad57a863fe"
+                                useTemplateDefault = $false
+                            }
+                            children = @()
+                        }
+                    }
+                },
+                @{
+                    id = "26"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance"
+                        settingDefinitionId = "device_vendor_msft_policy_config_defender_signatureupdateinterval"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "89879f27-6b7d-44d4-a08e-0a0de3e9663d"
+                        }
+                        simpleSettingValue = @{
+                            "@odata.type" = "#microsoft.graph.deviceManagementConfigurationIntegerSettingValue"
+                            value = 4
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "0af6bbed-a74a-4d08-8587-b16b10b774cb"
+                                useTemplateDefault = $false
+                            }
                         }
                     }
                 }
@@ -494,7 +936,7 @@ function New-DefenderAntivirusPolicy {
         }
         
         $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" -Body $body
-        Write-LogMessage -Message "Created comprehensive Defender Antivirus policy" -Type Success
+        Write-LogMessage -Message "Created comprehensive Defender Antivirus policy with 27 settings" -Type Success
         return $result
     }
     catch {
@@ -1202,813 +1644,6 @@ function New-EdgePolicies {
     }
 }
 
-function New-DefenderAntivirusPolicy {
-    Write-LogMessage -Message "Creating comprehensive Defender Antivirus policy with 27 settings..." -Type Info
-    
-    try {
-        $body = @{
-            name = "NGP Windows default policy"
-            description = "Default policy sets settings for all endpoints that are not governed by any other policy, ensuring that all your clients are managed as soon as MDE is deployed. The default policy is based on a set of pre-configured recommended settings and can be adjusted by user with admin priviledges."
-            platforms = "windows10"
-            technologies = "mdm,microsoftSense"
-            templateReference = @{
-                templateId = "804339ad-1553-4478-a742-138fb5807418_1"
-                templateFamily = "endpointSecurityAntivirus"
-                templateDisplayName = "Microsoft Defender Antivirus"
-                templateDisplayVersion = "Version 1"
-            }
-            settings = @(
-                @{
-                    id = "0"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_puaprotection"
-                        settingInstanceTemplateReference = @{
-                            settingInstanceTemplateId = "c0135c2a-f802-44f4-9b71-b0b976411b8c"
-                        }
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_defender_puaprotection_1"
-                            settingValueTemplateReference = @{
-                                settingValueTemplateId = "2d790211-18cb-4e32-b8cc-97407e2c0b45"
-                                useTemplateDefault = $false
-                            }
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "1"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_cloudblocklevel"
-                        settingInstanceTemplateReference = @{
-                            settingInstanceTemplateId = "c7a37009-c16e-4145-84c8-89a8c121fb15"
-                        }
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_defender_cloudblocklevel_2"
-                            settingValueTemplateReference = @{
-                                settingValueTemplateId = "517b4e84-e933-42b9-b92f-00e640b1a82d"
-                                useTemplateDefault = $false
-                            }
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "2"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_cloudextendedtimeout"
-                        settingInstanceTemplateReference = @{
-                            settingInstanceTemplateId = "f61c2788-14e4-4e80-a5a7-bf2ff5052f63"
-                        }
-                        simpleSettingValue = @{
-                            "@odata.type" = "#microsoft.graph.deviceManagementConfigurationIntegerSettingValue"
-                            value = 50
-                            settingValueTemplateReference = @{
-                                settingValueTemplateId = "608f1561-b603-46bd-bf5f-0b9872002f75"
-                                useTemplateDefault = $false
-                            }
-                        }
-                    }
-                },
-                @{
-                    id = "3"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_enablenetworkprotection"
-                        settingInstanceTemplateReference = @{
-                            settingInstanceTemplateId = "f53ab20e-8af6-48f5-9fa1-46863e1e517e"
-                        }
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_defender_enablenetworkprotection_1"
-                            settingValueTemplateReference = @{
-                                settingValueTemplateId = "ee58fb51-9ae5-408b-9406-b92b643f388a"
-                                useTemplateDefault = $false
-                            }
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "4"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_allowrealtimemonitoring"
-                        settingInstanceTemplateReference = @{
-                            settingInstanceTemplateId = "f0790e28-9231-4d37-8f44-84bb47ca1b3e"
-                        }
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_defender_allowrealtimemonitoring_1"
-                            settingValueTemplateReference = @{
-                                settingValueTemplateId = "0492c452-1069-4b91-9363-93b8e006ab12"
-                                useTemplateDefault = $false
-                            }
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "5"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_schedulescanday"
-                        settingInstanceTemplateReference = @{
-                            settingInstanceTemplateId = "087d3362-7e78-4983-96bc-1f4ea183f0e4"
-                        }
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_defender_schedulescanday_2"
-                            settingValueTemplateReference = @{
-                                settingValueTemplateId = "7f4d9dda-6d48-4353-90ca-9fa7164c7215"
-                                useTemplateDefault = $false
-                            }
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "6"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_schedulequickscantime"
-                        settingInstanceTemplateReference = @{
-                            settingInstanceTemplateId = "784a4af1-33fa-45f2-b945-138b7ff3bcb6"
-                        }
-                        simpleSettingValue = @{
-                            "@odata.type" = "#microsoft.graph.deviceManagementConfigurationIntegerSettingValue"
-                            value = 720
-                            settingValueTemplateReference = @{
-                                settingValueTemplateId = "5d5c55c8-1a4e-4272-830d-8dc64cd3ac03"
-                                useTemplateDefault = $false
-                            }
-                        }
-                    }
-                },
-                @{
-                    id = "7"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_scanparameter"
-                        settingInstanceTemplateReference = @{
-                            settingInstanceTemplateId = "27ca2652-46f3-4cc7-83f2-bf85ff722d84"
-                        }
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_defender_scanparameter_1"
-                            settingValueTemplateReference = @{
-                                settingValueTemplateId = "70c8f42e-ee6a-4ef1-a070-cb0e9d472581"
-                                useTemplateDefault = $false
-                            }
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "8"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_allowarchivescanning"
-                        settingInstanceTemplateReference = @{
-                            settingInstanceTemplateId = "7c5c9cde-f74d-4d11-904f-de4c27f72d89"
-                        }
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_defender_allowarchivescanning_1"
-                            settingValueTemplateReference = @{
-                                settingValueTemplateId = "9ead75d4-6f30-4bc5-8cc5-ab0f999d79f0"
-                                useTemplateDefault = $false
-                            }
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "9"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_enablelowcpupriority"
-                        settingInstanceTemplateReference = @{
-                            settingInstanceTemplateId = "cdeb96cf-18f5-4477-a710-0ea9ecc618af"
-                        }
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_defender_enablelowcpupriority_0"
-                            settingValueTemplateReference = @{
-                                settingValueTemplateId = "045a4a13-deee-4e24-9fe4-985c9357680d"
-                                useTemplateDefault = $false
-                            }
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "10"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_disablecatchupfullscan"
-                        settingInstanceTemplateReference = @{
-                            settingInstanceTemplateId = "f881b08c-f047-40d2-b7d9-3dde7ce9ef64"
-                        }
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_defender_disablecatchupfullscan_0"
-                            settingValueTemplateReference = @{
-                                settingValueTemplateId = "1b26092f-48c4-447b-99d4-e9c501542f1c"
-                                useTemplateDefault = $false
-                            }
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "11"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_disablecatchupquickscan"
-                        settingInstanceTemplateReference = @{
-                            settingInstanceTemplateId = "dabf6781-9d5d-42da-822a-d4327aa2bdd1"
-                        }
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_defender_disablecatchupquickscan_0"
-                            settingValueTemplateReference = @{
-                                settingValueTemplateId = "d263ced7-0d23-4095-9326-99c8b3f5d35b"
-                                useTemplateDefault = $false
-                            }
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "12"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_avgcpuloadfactor"
-                        settingInstanceTemplateReference = @{
-                            settingInstanceTemplateId = "816cc03e-8f96-4cba-b14f-2658d031a79a"
-                        }
-                        simpleSettingValue = @{
-                            "@odata.type" = "#microsoft.graph.deviceManagementConfigurationIntegerSettingValue"
-                            value = 50
-                            settingValueTemplateReference = @{
-                                settingValueTemplateId = "37195fb1-3743-4c8e-a0ce-b6fae6fa3acd"
-                                useTemplateDefault = $false
-                            }
-                        }
-                    }
-                },
-                @{
-                    id = "13"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_allowuseruiaccess"
-                        settingInstanceTemplateReference = @{
-                            settingInstanceTemplateId = "0170a900-b0bc-4ccc-b7ce-dda9be49189b"
-                        }
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_defender_allowuseruiaccess_1"
-                            settingValueTemplateReference = @{
-                                settingValueTemplateId = "4b6c9739-4449-4006-8e5f-3049136470ea"
-                                useTemplateDefault = $false
-                            }
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "14"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_allowcloudprotection"
-                        settingInstanceTemplateReference = @{
-                            settingInstanceTemplateId = "7da139f1-9b7e-407d-853a-c2e5037cdc70"
-                        }
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_defender_allowcloudprotection_1"
-                            settingValueTemplateReference = @{
-                                settingValueTemplateId = "16fe8afd-67be-4c50-8619-d535451a500c"
-                                useTemplateDefault = $false
-                            }
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "15"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_realtimescandirection"
-                        settingInstanceTemplateReference = @{
-                            settingInstanceTemplateId = "f5ff00a4-e5c7-44cf-a650-9c7619ff1561"
-                        }
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_defender_realtimescandirection_0"
-                            settingValueTemplateReference = @{
-                                settingValueTemplateId = "6b4e3497-cfbb-4761-a152-de935bbf3f07"
-                                useTemplateDefault = $false
-                            }
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "16"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_allowbehaviormonitoring"
-                        settingInstanceTemplateReference = @{
-                            settingInstanceTemplateId = "8eef615a-1aa0-46f4-a25a-12cbe65de5ab"
-                        }
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_defender_allowbehaviormonitoring_1"
-                            settingValueTemplateReference = @{
-                                settingValueTemplateId = "905921da-95e2-4a10-9e30-fe5540002ce1"
-                                useTemplateDefault = $false
-                            }
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "17"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_allowioavprotection"
-                        settingInstanceTemplateReference = @{
-                            settingInstanceTemplateId = "fa06231d-aed4-4601-b631-3a37e85b62a0"
-                        }
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_defender_allowioavprotection_1"
-                            settingValueTemplateReference = @{
-                                settingValueTemplateId = "df4e6cbd-f7ff-41c8-88cd-fa25264a237e"
-                                useTemplateDefault = $false
-                            }
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "18"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_allowscriptscanning"
-                        settingInstanceTemplateReference = @{
-                            settingInstanceTemplateId = "000cf176-949c-4c08-a5d4-90ed43718db7"
-                        }
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_defender_allowscriptscanning_1"
-                            settingValueTemplateReference = @{
-                                settingValueTemplateId = "ab9e4320-c953-4067-ac9a-be2becd06b4a"
-                                useTemplateDefault = $false
-                            }
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "19"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_allowscanningnetworkfiles"
-                        settingInstanceTemplateReference = @{
-                            settingInstanceTemplateId = "f8f28442-0a6b-4b52-b42c-d31d9687c1cf"
-                        }
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_defender_allowscanningnetworkfiles_1"
-                            settingValueTemplateReference = @{
-                                settingValueTemplateId = "7b8c858c-a17d-4623-9e20-f34b851670ce"
-                                useTemplateDefault = $false
-                            }
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "20"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_allowemailscanning"
-                        settingInstanceTemplateReference = @{
-                            settingInstanceTemplateId = "b0d9ee81-de6a-4750-86d7-9397961c9852"
-                        }
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_defender_allowemailscanning_0"
-                            settingValueTemplateReference = @{
-                                settingValueTemplateId = "fdf107fd-e13b-4507-9d8f-db4d93476af9"
-                                useTemplateDefault = $false
-                            }
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "21"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_daystoretaincleanedmalware"
-                        settingInstanceTemplateReference = @{
-                            settingInstanceTemplateId = "6f6d741c-1186-42e2-b2f2-8582febcfd60"
-                        }
-                        simpleSettingValue = @{
-                            "@odata.type" = "#microsoft.graph.deviceManagementConfigurationIntegerSettingValue"
-                            value = 0
-                            settingValueTemplateReference = @{
-                                settingValueTemplateId = "214b6feb-c9b2-4a17-af54-d51c805473e4"
-                                useTemplateDefault = $false
-                            }
-                        }
-                    }
-                },
-                @{
-                    id = "22"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_submitsamplesconsent"
-                        settingInstanceTemplateReference = @{
-                            settingInstanceTemplateId = "bc47ce7d-a251-4cae-a8a2-6e8384904ab7"
-                        }
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_defender_submitsamplesconsent_1"
-                            settingValueTemplateReference = @{
-                                settingValueTemplateId = "826ed4b6-e04f-4975-9d23-6f0904b0d87e"
-                                useTemplateDefault = $false
-                            }
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "23"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_allowfullscanonmappednetworkdrives"
-                        settingInstanceTemplateReference = @{
-                            settingInstanceTemplateId = "dac47505-f072-48d6-9f23-8d93262d58ed"
-                        }
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_defender_allowfullscanonmappednetworkdrives_0"
-                            settingValueTemplateReference = @{
-                                settingValueTemplateId = "3e920b10-3773-4ac5-957e-e5573aec6d04"
-                                useTemplateDefault = $false
-                            }
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "24"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_allowfullscanremovabledrivescanning"
-                        settingInstanceTemplateReference = @{
-                            settingInstanceTemplateId = "fb36e70b-5bc9-488a-a949-8ea3ac1634d5"
-                        }
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_defender_allowfullscanremovabledrivescanning_1"
-                            settingValueTemplateReference = @{
-                                settingValueTemplateId = "366c5727-629b-4a81-b50b-52f90282fa2c"
-                                useTemplateDefault = $false
-                            }
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "25"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_checkforsignaturesbeforerunningscan"
-                        settingInstanceTemplateReference = @{
-                            settingInstanceTemplateId = "4fea56e3-7bb6-4ad3-88c6-e364dd2f97b9"
-                        }
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_defender_checkforsignaturesbeforerunningscan_1"
-                            settingValueTemplateReference = @{
-                                settingValueTemplateId = "010779d1-edd4-441d-8034-89ad57a863fe"
-                                useTemplateDefault = $false
-                            }
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "26"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_signatureupdateinterval"
-                        settingInstanceTemplateReference = @{
-                            settingInstanceTemplateId = "89879f27-6b7d-44d4-a08e-0a0de3e9663d"
-                        }
-                        simpleSettingValue = @{
-                            "@odata.type" = "#microsoft.graph.deviceManagementConfigurationIntegerSettingValue"
-                            value = 4
-                            settingValueTemplateReference = @{
-                                settingValueTemplateId = "0af6bbed-a74a-4d08-8587-b16b10b774cb"
-                                useTemplateDefault = $false
-                            }
-                        }
-                    }
-                }
-            )
-        }
-        
-        $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" -Body $body
-        Write-LogMessage -Message "Created comprehensive Defender Antivirus policy with 27 settings" -Type Success
-        return $result
-    }
-    catch {
-        Write-LogMessage -Message "Failed to create Defender Antivirus policy - $($_.Exception.Message)" -Type Error
-        return $null
-    }
-}
-
-# === Remaining Policy Functions (with placeholder complete settings) ===
-
-function New-DefenderPolicy {
-    Write-LogMessage -Message "Creating comprehensive Defender policy..." -Type Info
-    
-    try {
-        $body = @{
-            name = "Defender Configuration"
-            description = "Microsoft Defender comprehensive security configuration"
-            platforms = "windows10"
-            technologies = "mdm"
-            settings = @(
-                @{
-                    id = "0"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_allowintrusionpreventionsystem"
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_defender_allowintrusionpreventionsystem_1"
-                            children = @()
-                        }
-                    }
-                }
-            )
-        }
-        
-        $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" -Body $body
-        Write-LogMessage -Message "Created Defender policy" -Type Success
-        return $result
-    }
-    catch {
-        Write-LogMessage -Message "Failed to create Defender policy - $($_.Exception.Message)" -Type Error
-        return $null
-    }
-}
-
-function New-FirewallPolicy {
-    Write-LogMessage -Message "Creating Windows Firewall policy with template..." -Type Info
-    
-    try {
-        $body = @{
-            name = "Firewall Windows default policy"
-            description = "Default policy sets settings for all endpoints that are not governed by any other policy, ensuring that all your clients are managed as soon as MDE is deployed. The default policy is based on a set of pre-configured recommended settings and can be adjusted by user with admin priviledges."
-            platforms = "windows10"
-            technologies = "mdm,microsoftSense"
-            templateReference = @{
-                templateId = "6078910e-d808-4a9f-a51d-1b8a7bacb7c0_1"
-                templateFamily = "endpointSecurityFirewall"
-                templateDisplayName = "Windows Firewall"
-                templateDisplayVersion = "Version 1"
-            }
-            settings = @(
-                @{
-                    id = "0"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "vendor_msft_firewall_mdmstore_domainprofile_enablefirewall"
-                        settingInstanceTemplateReference = @{
-                            settingInstanceTemplateId = "7714c373-a19a-4b64-ba6d-2e9db04a7684"
-                        }
-                        choiceSettingValue = @{
-                            value = "vendor_msft_firewall_mdmstore_domainprofile_enablefirewall_true"
-                            settingValueTemplateReference = @{
-                                settingValueTemplateId = "120c5dbe-0c88-46f0-b897-2c996d3e5277"
-                                useTemplateDefault = $false
-                            }
-                            children = @(
-                                @{
-                                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                                    settingDefinitionId = "vendor_msft_firewall_mdmstore_domainprofile_defaultinboundaction"
-                                    choiceSettingValue = @{
-                                        value = "vendor_msft_firewall_mdmstore_domainprofile_defaultinboundaction_1"
-                                        children = @()
-                                    }
-                                },
-                                @{
-                                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                                    settingDefinitionId = "vendor_msft_firewall_mdmstore_domainprofile_defaultoutboundaction"
-                                    choiceSettingValue = @{
-                                        value = "vendor_msft_firewall_mdmstore_domainprofile_defaultoutboundaction_0"
-                                        children = @()
-                                    }
-                                }
-                            )
-                        }
-                    }
-                },
-                @{
-                    id = "1"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "vendor_msft_firewall_mdmstore_privateprofile_enablefirewall"
-                        settingInstanceTemplateReference = @{
-                            settingInstanceTemplateId = "1c14f914-69bb-49f8-af5b-e29173a6ee95"
-                        }
-                        choiceSettingValue = @{
-                            value = "vendor_msft_firewall_mdmstore_privateprofile_enablefirewall_true"
-                            settingValueTemplateReference = @{
-                                settingValueTemplateId = "9d55dfae-d55f-4f2a-af03-9a9524f61e76"
-                                useTemplateDefault = $false
-                            }
-                            children = @(
-                                @{
-                                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                                    settingDefinitionId = "vendor_msft_firewall_mdmstore_privateprofile_defaultinboundaction"
-                                    choiceSettingValue = @{
-                                        value = "vendor_msft_firewall_mdmstore_privateprofile_defaultinboundaction_1"
-                                        children = @()
-                                    }
-                                },
-                                @{
-                                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                                    settingDefinitionId = "vendor_msft_firewall_mdmstore_privateprofile_defaultoutboundaction"
-                                    choiceSettingValue = @{
-                                        value = "vendor_msft_firewall_mdmstore_privateprofile_defaultoutboundaction_0"
-                                        children = @()
-                                    }
-                                }
-                            )
-                        }
-                    }
-                },
-                @{
-                    id = "2"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "vendor_msft_firewall_mdmstore_publicprofile_enablefirewall"
-                        settingInstanceTemplateReference = @{
-                            settingInstanceTemplateId = "e2714734-708e-4286-8ae9-d56821e306a3"
-                        }
-                        choiceSettingValue = @{
-                            value = "vendor_msft_firewall_mdmstore_publicprofile_enablefirewall_true"
-                            settingValueTemplateReference = @{
-                                settingValueTemplateId = "c38694c7-51a4-4a35-8f64-b10866a04776"
-                                useTemplateDefault = $false
-                            }
-                            children = @(
-                                @{
-                                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                                    settingDefinitionId = "vendor_msft_firewall_mdmstore_publicprofile_defaultinboundaction"
-                                    choiceSettingValue = @{
-                                        value = "vendor_msft_firewall_mdmstore_publicprofile_defaultinboundaction_1"
-                                        children = @()
-                                    }
-                                },
-                                @{
-                                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                                    settingDefinitionId = "vendor_msft_firewall_mdmstore_publicprofile_defaultoutboundaction"
-                                    choiceSettingValue = @{
-                                        value = "vendor_msft_firewall_mdmstore_publicprofile_defaultoutboundaction_0"
-                                        children = @()
-                                    }
-                                }
-                            )
-                        }
-                    }
-                }
-            )
-        }
-        
-        $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" -Body $body
-        Write-LogMessage -Message "Created Windows Firewall policy with template references" -Type Success
-        return $result
-    }
-    catch {
-        Write-LogMessage -Message "Failed to create Windows Firewall policy - $($_.Exception.Message)" -Type Error
-        return $null
-    }
-}
-
-function New-TamperProtectionPolicy {
-    Write-LogMessage -Message "Creating Tamper Protection policy..." -Type Info
-    
-    try {
-        $body = @{
-            name = "Tamper Protection"
-            description = "Windows Security tamper protection configuration"
-            platforms = "windows10"
-            technologies = "mdm,microsoftSense"
-            templateReference = @{
-                templateId = "d948ff9b-99cb-4ee0-8012-1fbc09685377_1"
-                templateFamily = "endpointSecurityAntivirus"
-                templateDisplayName = "Windows Security Experience"
-                templateDisplayVersion = "Version 1"
-            }
-            settings = @(
-                @{
-                    id = "0"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "vendor_msft_defender_configuration_tamperprotection_options"
-                        settingInstanceTemplateReference = @{
-                            settingInstanceTemplateId = "5655cab2-7e6b-4c49-9ce2-3865da05f7e6"
-                        }
-                        choiceSettingValue = @{
-                            value = "vendor_msft_defender_configuration_tamperprotection_options_0"
-                            settingValueTemplateReference = @{
-                                settingValueTemplateId = "fc365da9-2c1b-4f79-aa4b-dedca69e728f"
-                                useTemplateDefault = $false
-                            }
-                            children = @()
-                        }
-                    }
-                }
-            )
-        }
-        
-        $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" -Body $body
-        Write-LogMessage -Message "Created Tamper Protection policy" -Type Success
-        return $result
-    }
-    catch {
-        Write-LogMessage -Message "Failed to create Tamper Protection policy - $($_.Exception.Message)" -Type Error
-        return $null
-    }
-}
-
-function New-EDRPolicy {
-    Write-LogMessage -Message "Creating EDR policy..." -Type Info
-    
-    try {
-        $body = @{
-            name = "EDR Policy"
-            description = "Endpoint Detection and Response configuration"
-            platforms = "windows10"
-            technologies = "mdm,microsoftSense"
-            templateReference = @{
-                templateId = "0385b795-0f2f-44ac-8602-9f65bf6adede_1"
-                templateFamily = "endpointSecurityEndpointDetectionAndResponse"
-                templateDisplayName = "Endpoint detection and response"
-                templateDisplayVersion = "Version 1"
-            }
-            settings = @(
-                @{
-                    id = "0"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_windowsadvancedthreatprotection_configurationtype"
-                        settingInstanceTemplateReference = @{
-                            settingInstanceTemplateId = "23ab0ea3-1b12-429a-8ed0-7390cf699160"
-                        }
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_windowsadvancedthreatprotection_configurationtype_autofromconnector"
-                            settingValueTemplateReference = @{
-                                settingValueTemplateId = "e5c7c98c-c854-4140-836e-bd22db59d651"
-                                useTemplateDefault = $false
-                            }
-                            children = @(
-                                @{
-                                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance"
-                                    settingDefinitionId = "device_vendor_msft_windowsadvancedthreatprotection_onboarding_fromconnector"
-                                    simpleSettingValue = @{
-                                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationSecretSettingValue"
-                                        value = "f72b3368-a08e-4567-8ba7-76e29686583f"
-                                        valueState = "encryptedValueToken"
-                                    }
-                                }
-                            )
-                        }
-                    }
-                },
-                @{
-                    id = "1"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_windowsadvancedthreatprotection_configuration_samplesharing"
-                        settingInstanceTemplateReference = @{
-                            settingInstanceTemplateId = "6998c81e-2814-4f5e-b492-a6159128a97b"
-                        }
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_windowsadvancedthreatprotection_configuration_samplesharing_1"
-                            settingValueTemplateReference = @{
-                                settingValueTemplateId = "f72c326c-7c5b-4224-b890-0b9b54522bd9"
-                                useTemplateDefault = $false
-                            }
-                            children = @()
-                        }
-                    }
-                }
-            )
-        }
-        
-        $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" -Body $body
-        Write-LogMessage -Message "Created EDR policy" -Type Success
-        return $result
-    }
-    catch {
-        Write-LogMessage -Message "Failed to create EDR policy - $($_.Exception.Message)" -Type Error
-        return $null
-    }
-}
-
 function New-LAPSPolicy {
     Write-LogMessage -Message "Creating LAPS policy with domain-based admin name..." -Type Info
     
@@ -2172,12 +1807,253 @@ function New-LAPSPolicy {
     }
 }
 
-function New-AdminAccountPolicy {
-    Write-LogMessage -Message "Creating Admin Account policy with rename..." -Type Info
+# === Remaining Policy Functions with Existence Checks ===
+
+function New-DefenderPolicy {
+    Write-LogMessage -Message "Creating comprehensive Defender policy..." -Type Info
+    
+    $policyName = "Defender Configuration"
+    if (Test-PolicyExists -PolicyName $policyName) {
+        Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
+        return @{ name = $policyName; id = "existing" }
+    }
     
     try {
         $body = @{
-            name = "Enable Built-in Administrator Account"
+            name = $policyName
+            description = "Microsoft Defender comprehensive security configuration"
+            platforms = "windows10"
+            technologies = "mdm"
+            settings = @(
+                @{
+                    id = "0"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                        settingDefinitionId = "device_vendor_msft_policy_config_defender_allowintrusionpreventionsystem"
+                        choiceSettingValue = @{
+                            value = "device_vendor_msft_policy_config_defender_allowintrusionpreventionsystem_1"
+                            children = @()
+                        }
+                    }
+                }
+            )
+        }
+        
+        $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" -Body $body
+        Write-LogMessage -Message "Created Defender policy" -Type Success
+        return $result
+    }
+    catch {
+        Write-LogMessage -Message "Failed to create Defender policy - $($_.Exception.Message)" -Type Error
+        return $null
+    }
+}
+
+function New-FirewallPolicy {
+    Write-LogMessage -Message "Creating Windows Firewall policy with template..." -Type Info
+    
+    $policyName = "Firewall Windows default policy"
+    if (Test-PolicyExists -PolicyName $policyName) {
+        Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
+        return @{ name = $policyName; id = "existing" }
+    }
+    
+    try {
+        $body = @{
+            name = $policyName
+            description = "Default policy sets settings for all endpoints that are not governed by any other policy, ensuring that all your clients are managed as soon as MDE is deployed. The default policy is based on a set of pre-configured recommended settings and can be adjusted by user with admin priviledges."
+            platforms = "windows10"
+            technologies = "mdm,microsoftSense"
+            templateReference = @{
+                templateId = "6078910e-d808-4a9f-a51d-1b8a7bacb7c0_1"
+                templateFamily = "endpointSecurityFirewall"
+                templateDisplayName = "Windows Firewall"
+                templateDisplayVersion = "Version 1"
+            }
+            settings = @(
+                @{
+                    id = "0"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                        settingDefinitionId = "vendor_msft_firewall_mdmstore_domainprofile_enablefirewall"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "7714c373-a19a-4b64-ba6d-2e9db04a7684"
+                        }
+                        choiceSettingValue = @{
+                            value = "vendor_msft_firewall_mdmstore_domainprofile_enablefirewall_true"
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "120c5dbe-0c88-46f0-b897-2c996d3e5277"
+                                useTemplateDefault = $false
+                            }
+                            children = @(
+                                @{
+                                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                                    settingDefinitionId = "vendor_msft_firewall_mdmstore_domainprofile_defaultinboundaction"
+                                    choiceSettingValue = @{
+                                        value = "vendor_msft_firewall_mdmstore_domainprofile_defaultinboundaction_1"
+                                        children = @()
+                                    }
+                                },
+                                @{
+                                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                                    settingDefinitionId = "vendor_msft_firewall_mdmstore_domainprofile_defaultoutboundaction"
+                                    choiceSettingValue = @{
+                                        value = "vendor_msft_firewall_mdmstore_domainprofile_defaultoutboundaction_0"
+                                        children = @()
+                                    }
+                                }
+                            )
+                        }
+                    }
+                },
+                @{
+                    id = "1"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                        settingDefinitionId = "vendor_msft_firewall_mdmstore_privateprofile_enablefirewall"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "1c14f914-69bb-49f8-af5b-e29173a6ee95"
+                        }
+                        choiceSettingValue = @{
+                            value = "vendor_msft_firewall_mdmstore_privateprofile_enablefirewall_true"
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "9d55dfae-d55f-4f2a-af03-9a9524f61e76"
+                                useTemplateDefault = $false
+                            }
+                            children = @(
+                                @{
+                                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                                    settingDefinitionId = "vendor_msft_firewall_mdmstore_privateprofile_defaultinboundaction"
+                                    choiceSettingValue = @{
+                                        value = "vendor_msft_firewall_mdmstore_privateprofile_defaultinboundaction_1"
+                                        children = @()
+                                    }
+                                },
+                                @{
+                                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                                    settingDefinitionId = "vendor_msft_firewall_mdmstore_privateprofile_defaultoutboundaction"
+                                    choiceSettingValue = @{
+                                        value = "vendor_msft_firewall_mdmstore_privateprofile_defaultoutboundaction_0"
+                                        children = @()
+                                    }
+                                }
+                            )
+                        }
+                    }
+                },
+                @{
+                    id = "2"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                        settingDefinitionId = "vendor_msft_firewall_mdmstore_publicprofile_enablefirewall"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "e2714734-708e-4286-8ae9-d56821e306a3"
+                        }
+                        choiceSettingValue = @{
+                            value = "vendor_msft_firewall_mdmstore_publicprofile_enablefirewall_true"
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "c38694c7-51a4-4a35-8f64-b10866a04776"
+                                useTemplateDefault = $false
+                            }
+                            children = @(
+                                @{
+                                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                                    settingDefinitionId = "vendor_msft_firewall_mdmstore_publicprofile_defaultinboundaction"
+                                    choiceSettingValue = @{
+                                        value = "vendor_msft_firewall_mdmstore_publicprofile_defaultinboundaction_1"
+                                        children = @()
+                                    }
+                                },
+                                @{
+                                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                                    settingDefinitionId = "vendor_msft_firewall_mdmstore_publicprofile_defaultoutboundaction"
+                                    choiceSettingValue = @{
+                                        value = "vendor_msft_firewall_mdmstore_publicprofile_defaultoutboundaction_0"
+                                        children = @()
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+            )
+        }
+        
+        $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" -Body $body
+        Write-LogMessage -Message "Created Windows Firewall policy with template references" -Type Success
+        return $result
+    }
+    catch {
+        Write-LogMessage -Message "Failed to create Windows Firewall policy - $($_.Exception.Message)" -Type Error
+        return $null
+    }
+}
+
+function New-TamperProtectionPolicy {
+    Write-LogMessage -Message "Creating Tamper Protection policy..." -Type Info
+    
+    $policyName = "Tamper Protection"
+    if (Test-PolicyExists -PolicyName $policyName) {
+        Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
+        return @{ name = $policyName; id = "existing" }
+    }
+    
+    try {
+        $body = @{
+            name = $policyName
+            description = "Windows Security tamper protection configuration"
+            platforms = "windows10"
+            technologies = "mdm,microsoftSense"
+            templateReference = @{
+                templateId = "d948ff9b-99cb-4ee0-8012-1fbc09685377_1"
+                templateFamily = "endpointSecurityAntivirus"
+                templateDisplayName = "Windows Security Experience"
+                templateDisplayVersion = "Version 1"
+            }
+            settings = @(
+                @{
+                    id = "0"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                        settingDefinitionId = "vendor_msft_defender_configuration_tamperprotection_options"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "5655cab2-7e6b-4c49-9ce2-3865da05f7e6"
+                        }
+                        choiceSettingValue = @{
+                            value = "vendor_msft_defender_configuration_tamperprotection_options_0"
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "fc365da9-2c1b-4f79-aa4b-dedca69e728f"
+                                useTemplateDefault = $false
+                            }
+                            children = @()
+                        }
+                    }
+                }
+            )
+        }
+        
+        $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" -Body $body
+        Write-LogMessage -Message "Created Tamper Protection policy" -Type Success
+        return $result
+    }
+    catch {
+        Write-LogMessage -Message "Failed to create Tamper Protection policy - $($_.Exception.Message)" -Type Error
+        return $null
+    }
+}
+
+function New-AdminAccountPolicy {
+    Write-LogMessage -Message "Creating Admin Account policy with rename..." -Type Info
+    
+    $policyName = "Enable Built-in Administrator Account"
+    if (Test-PolicyExists -PolicyName $policyName) {
+        Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
+        return @{ name = $policyName; id = "existing" }
+    }
+    
+    try {
+        $body = @{
+            name = $policyName
             description = "Enable and configure built-in administrator account for LAPS"
             platforms = "windows10"
             technologies = "mdm"
@@ -2226,9 +2102,15 @@ function New-AdminAccountPolicy {
 function New-UnenrollmentPolicy {
     Write-LogMessage -Message "Creating Device Unenrollment Prevention policy..." -Type Info
     
+    $policyName = "Prevent Users From Unenrolling Devices"
+    if (Test-PolicyExists -PolicyName $policyName) {
+        Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
+        return @{ name = $policyName; id = "existing" }
+    }
+    
     try {
         $body = @{
-            name = "Prevent Users From Unenrolling Devices"
+            name = $policyName
             description = "Prevent users from manually unenrolling devices from Intune"
             platforms = "windows10"
             technologies = "mdm"
@@ -2260,9 +2142,15 @@ function New-UnenrollmentPolicy {
 function New-OfficePolicies {
     Write-LogMessage -Message "Creating Office configuration policies..." -Type Info
     
+    $policyName = "Office Updates Configuration"
+    if (Test-PolicyExists -PolicyName $policyName) {
+        Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
+        return @{ name = $policyName; id = "existing" }
+    }
+    
     try {
         $body = @{
-            name = "Office Updates Configuration"
+            name = $policyName
             description = "Microsoft Office update settings"
             platforms = "windows10"
             technologies = "mdm"
@@ -2294,9 +2182,15 @@ function New-OfficePolicies {
 function New-OutlookPolicy {
     Write-LogMessage -Message "Creating Outlook configuration policy..." -Type Info
     
+    $policyName = "Outlook Configuration"
+    if (Test-PolicyExists -PolicyName $policyName) {
+        Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
+        return @{ name = $policyName; id = "existing" }
+    }
+    
     try {
         $body = @{
-            name = "Outlook Configuration"
+            name = $policyName
             description = "Microsoft Outlook user experience settings"
             platforms = "windows10"
             technologies = "mdm"
@@ -2325,14 +2219,18 @@ function New-OutlookPolicy {
     }
 }
 
-# === Helper Functions ===
-
 function New-EdgeUpdatePolicy {
     Write-LogMessage -Message "Creating Edge Update policy..." -Type Info
     
+    $policyName = "Edge Update Policy"
+    if (Test-PolicyExists -PolicyName $policyName) {
+        Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
+        return @{ name = $policyName; id = "existing" }
+    }
+    
     try {
         $body = @{
-            name = "Edge Update Policy"
+            name = $policyName
             description = "Microsoft Edge update configuration"
             platforms = "windows10"
             technologies = "mdm"
@@ -2441,9 +2339,15 @@ function New-EdgeUpdatePolicy {
 function New-DisableUACPolicy {
     Write-LogMessage -Message "Creating Disable UAC for QuickAssist policy..." -Type Info
     
+    $policyName = "Disable UAC for Quickassist"
+    if (Test-PolicyExists -PolicyName $policyName) {
+        Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
+        return @{ name = $policyName; id = "existing" }
+    }
+    
     try {
         $body = @{
-            name = "Disable UAC for Quickassist"
+            name = $policyName
             description = "Disable UAC secure desktop prompt for QuickAssist"
             platforms = "windows10"
             technologies = "mdm"
