@@ -154,20 +154,42 @@ function New-TenantIntune {
         Write-LogMessage -Message "Assigning policies to WindowsAutoPilot group only..." -Type Info
         $deviceGroups = @("WindowsAutoPilot")
         
-        # Assign new policies
-        foreach ($policy in $newPolicies) {
-            Assign-PolicyToGroups -PolicyId $policy.id -GroupNames $deviceGroups
+        # CORRECTED: Verify all target groups exist before assignment
+        $validGroups = @()
+        foreach ($groupName in $deviceGroups) {
+            if (Test-GroupExists -GroupName $groupName) {
+                $validGroups += $groupName
+            }
+            else {
+                Write-LogMessage -Message "Warning: Group '$groupName' not found or not accessible - skipping from assignments" -Type Warning
+            }
         }
         
-        # Update existing policies with AutoPilot group assignment (if requested)
-        if ($existingPolicyNames.Count -gt 0 -and $UpdateExistingPolicies) {
-            Write-LogMessage -Message "Updating assignments for $($existingPolicyNames.Count) existing policies..." -Type Info
-            Write-LogMessage -Message "Existing policies: $($existingPolicyNames -join ', ')" -Type Info
-            Update-ExistingPolicyAssignments -PolicyNames $existingPolicyNames -GroupNames $deviceGroups
+        if ($validGroups.Count -eq 0) {
+            Write-LogMessage -Message "No valid groups found for assignment - policies created but not assigned" -Type Warning
+            Write-LogMessage -Message "Intune configuration completed with warnings" -Type Warning
+            return $true
         }
-        elseif ($existingPolicyNames.Count -gt 0 -and -not $UpdateExistingPolicies) {
-            Write-LogMessage -Message "Found $($existingPolicyNames.Count) existing policies, but update mode is disabled" -Type Warning
-            Write-LogMessage -Message "Existing policies: $($existingPolicyNames -join ', ')" -Type Info
+        
+        # CORRECTED: Use the new assignment function with proper waiting and error handling
+        Write-LogMessage -Message "Starting policy assignments to groups: $($validGroups -join ', ')..." -Type Info
+        
+        $assignmentResults = Assign-PoliciesWithWait `
+            -NewPolicies $newPolicies `
+            -ExistingPolicyNames $existingPolicyNames `
+            -GroupNames $validGroups `
+            -UpdateExistingPolicies $UpdateExistingPolicies
+        
+        # Enhanced logging with detailed results
+        Write-LogMessage -Message "Policy assignment completed!" -Type Success
+        Write-LogMessage -Message "Assignment Results:" -Type Info
+        Write-LogMessage -Message "  - Successful assignments: $($assignmentResults.Success)" -Type Info
+        Write-LogMessage -Message "  - Failed assignments: $($assignmentResults.Failed)" -Type Info
+        Write-LogMessage -Message "  - Total operations: $($assignmentResults.Total)" -Type Info
+        Write-LogMessage -Message "  - Target groups: $($validGroups -join ', ')" -Type Info
+        
+        if ($assignmentResults.Failed -gt 0) {
+            Write-LogMessage -Message "Some assignments failed. Check log details above for specific errors." -Type Warning
         }
         
         Write-LogMessage -Message "Intune configuration completed successfully" -Type Success
@@ -175,6 +197,7 @@ function New-TenantIntune {
     }
     catch {
         Write-LogMessage -Message "Error in Intune configuration - $($_.Exception.Message)" -Type Error
+        Write-LogMessage -Message "Full error details: $($_.Exception.ToString())" -Type Error -LogOnly
         return $false
     }
 }
@@ -2486,23 +2509,16 @@ function Assign-PolicyToGroups {
     <#
     .SYNOPSIS
     CORRECTED function to assign Intune configuration policies to groups using proper Graph API endpoints
-    
-    .DESCRIPTION
-    This function uses the correct /assign endpoint and proper request body structure
-    to assign configuration policies to Azure AD groups in Intune.
-    
-    .PARAMETER PolicyId
-    The ID of the configuration policy to assign
-    
-    .PARAMETER GroupNames
-    Array of group names to assign the policy to
     #>
     param (
         [Parameter(Mandatory = $true)]
         [string]$PolicyId,
         
         [Parameter(Mandatory = $true)]
-        [array]$GroupNames
+        [array]$GroupNames,
+        
+        [Parameter(Mandatory = $false)]
+        [string]$PolicyName = "Unknown Policy"
     )
     
     try {
@@ -2513,18 +2529,18 @@ function Assign-PolicyToGroups {
             if ($script:TenantState.CreatedGroups.ContainsKey($groupName)) {
                 $groupId = $script:TenantState.CreatedGroups[$groupName]
                 
-                # CORRECTED: Add required ID field with generated GUID
+                # CORRECTED: Simplified assignment structure without ID field
                 $assignments += @{
-                    id = (New-Guid).Guid
                     target = @{
                         "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
                         groupId = $groupId
                     }
                 }
                 $assignedGroups += $groupName
+                Write-LogMessage -Message "Prepared assignment for group '$groupName' (ID: $groupId)" -Type Info -LogOnly
             }
             else {
-                Write-LogMessage -Message "Group '$groupName' not found in created groups, skipping assignment" -Type Warning -LogOnly
+                Write-LogMessage -Message "Group '$groupName' not found in created groups, skipping assignment" -Type Warning
             }
         }
         
@@ -2533,22 +2549,24 @@ function Assign-PolicyToGroups {
                 assignments = $assignments
             }
             
-            # CORRECTED: Use /assign endpoint instead of /assignments
             $assignUrl = "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$PolicyId/assign"
             
-            Write-LogMessage -Message "Assigning policy $PolicyId using endpoint: $assignUrl" -Type Info -LogOnly
-            Write-LogMessage -Message "Assignment body: $($body | ConvertTo-Json -Depth 5)" -Type Info -LogOnly
+            Write-LogMessage -Message "Assigning policy '$PolicyName' to groups: $($assignedGroups -join ', ')" -Type Info
             
-            Invoke-MgGraphRequest -Method POST -Uri $assignUrl -Body $body
-            Write-LogMessage -Message "Successfully assigned policy $PolicyId to groups: $($assignedGroups -join ', ')" -Type Success
+            $result = Invoke-MgGraphRequest -Method POST -Uri $assignUrl -Body $body -ContentType "application/json"
+            Write-LogMessage -Message "Successfully assigned policy '$PolicyName' to $($assignedGroups.Count) group(s): $($assignedGroups -join ', ')" -Type Success
+            
+            return $true
         }
         else {
-            Write-LogMessage -Message "No valid groups found for policy assignment" -Type Warning
+            Write-LogMessage -Message "No valid groups found for policy '$PolicyName' assignment" -Type Warning
+            return $false
         }
     }
     catch {
-        Write-LogMessage -Message "Failed to assign policy $PolicyId - $($_.Exception.Message)" -Type Error
+        Write-LogMessage -Message "Failed to assign policy '$PolicyName' - $($_.Exception.Message)" -Type Error
         Write-LogMessage -Message "Full error details: $($_.Exception.ToString())" -Type Error -LogOnly
+        return $false
     }
 }
 
@@ -2556,16 +2574,6 @@ function Update-ExistingPolicyAssignments {
     <#
     .SYNOPSIS
     CORRECTED function to update existing policy assignments using proper Graph API
-    
-    .DESCRIPTION
-    Updates existing configuration policies with new group assignments while preserving
-    existing assignments. Uses the correct /assign endpoint.
-    
-    .PARAMETER PolicyNames
-    Array of policy names to update
-    
-    .PARAMETER GroupNames
-    Array of group names to assign to the policies
     #>
     param (
         [Parameter(Mandatory = $true)]
@@ -2576,90 +2584,233 @@ function Update-ExistingPolicyAssignments {
     )
     
     try {
+        Write-LogMessage -Message "Updating assignments for $($PolicyNames.Count) existing policies..." -Type Info
+        
         # Get all existing policies first
         $existingPolicies = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" -ErrorAction Stop
         
+        $successCount = 0
+        $failureCount = 0
+        
         foreach ($policyName in $PolicyNames) {
-            # Find the policy by name
-            $policy = $existingPolicies.value | Where-Object { $_.name -eq $policyName }
-            
-            if (-not $policy) {
-                Write-LogMessage -Message "Policy '$policyName' not found, skipping assignment update" -Type Warning
-                continue
-            }
-            
-            Write-LogMessage -Message "Updating assignments for existing policy: $policyName" -Type Info
-            
-            # Get current assignments for this policy using CORRECTED endpoint
-            $currentAssignments = @()
             try {
-                $assignmentResponse = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$($policy.id)/assignments" -ErrorAction Stop
-                $currentAssignments = $assignmentResponse.value
-            }
-            catch {
-                Write-LogMessage -Message "Could not retrieve current assignments for $policyName, proceeding with new assignments only" -Type Warning -LogOnly
-            }
-            
-            # Build list of new assignments to add
-            $newAssignments = @()
-            $existingGroupIds = @()
-            
-            # Extract existing group IDs to avoid duplicates
-            foreach ($assignment in $currentAssignments) {
-                if ($assignment.target.'@odata.type' -eq "#microsoft.graph.groupAssignmentTarget") {
-                    $existingGroupIds += $assignment.target.groupId
+                # Find the policy by name
+                $policy = $existingPolicies.value | Where-Object { $_.name -eq $policyName }
+                
+                if (-not $policy) {
+                    Write-LogMessage -Message "Policy '$policyName' not found, skipping assignment update" -Type Warning
+                    $failureCount++
+                    continue
                 }
                 
-                # CORRECTED: Preserve existing assignments with proper structure
-                $newAssignments += @{
-                    id = if ($assignment.id) { $assignment.id } else { (New-Guid).Guid }
-                    target = $assignment.target
+                # Get current assignments
+                $currentAssignments = @()
+                try {
+                    $assignmentResponse = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$($policy.id)/assignments" -ErrorAction Stop
+                    $currentAssignments = $assignmentResponse.value
                 }
-            }
-            
-            # Add new groups that aren't already assigned
-            foreach ($groupName in $GroupNames) {
-                if ($script:TenantState.CreatedGroups.ContainsKey($groupName)) {
-                    $groupId = $script:TenantState.CreatedGroups[$groupName]
-                    
-                    if ($existingGroupIds -notcontains $groupId) {
-                        # CORRECTED: Add required ID field
-                        $newAssignments += @{
-                            id = (New-Guid).Guid
-                            target = @{
-                                "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
-                                groupId = $groupId
+                catch {
+                    Write-LogMessage -Message "Could not retrieve current assignments for $policyName, proceeding with new assignments only" -Type Warning
+                }
+                
+                # Build new assignments list
+                $newAssignments = @()
+                $existingGroupIds = @()
+                
+                # Preserve existing assignments
+                foreach ($assignment in $currentAssignments) {
+                    if ($assignment.target.'@odata.type' -eq "#microsoft.graph.groupAssignmentTarget") {
+                        $existingGroupIds += $assignment.target.groupId
+                    }
+                    $newAssignments += @{
+                        target = $assignment.target
+                    }
+                }
+                
+                # Add new groups that aren't already assigned
+                $newGroupsAdded = 0
+                foreach ($groupName in $GroupNames) {
+                    if ($script:TenantState.CreatedGroups.ContainsKey($groupName)) {
+                        $groupId = $script:TenantState.CreatedGroups[$groupName]
+                        
+                        if ($existingGroupIds -notcontains $groupId) {
+                            $newAssignments += @{
+                                target = @{
+                                    "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
+                                    groupId = $groupId
+                                }
                             }
+                            $newGroupsAdded++
                         }
-                        Write-LogMessage -Message "Adding group '$groupName' to policy '$policyName'" -Type Info -LogOnly
                     }
-                    else {
-                        Write-LogMessage -Message "Group '$groupName' already assigned to policy '$policyName'" -Type Info -LogOnly
+                }
+                
+                # Update if we have new assignments
+                if ($newGroupsAdded -gt 0) {
+                    $body = @{
+                        assignments = $newAssignments
                     }
+                    
+                    $assignUrl = "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$($policy.id)/assign"
+                    
+                    Invoke-MgGraphRequest -Method POST -Uri $assignUrl -Body $body -ContentType "application/json"
+                    Write-LogMessage -Message "Successfully updated assignments for policy '$policyName'" -Type Success
+                    $successCount++
                 }
                 else {
-                    Write-LogMessage -Message "Group '$groupName' not found in created groups, skipping" -Type Warning -LogOnly
+                    Write-LogMessage -Message "No new assignments needed for policy '$policyName'" -Type Info
+                    $successCount++
                 }
             }
-            
-            # Update the policy assignments using CORRECTED endpoint and structure
-            $body = @{
-                assignments = $newAssignments
+            catch {
+                Write-LogMessage -Message "Error updating assignments for policy '$policyName': $($_.Exception.Message)" -Type Error
+                $failureCount++
             }
-            
-            # CORRECTED: Use /assign endpoint
-            $assignUrl = "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$($policy.id)/assign"
-            
-            Write-LogMessage -Message "Updating policy assignments using endpoint: $assignUrl" -Type Info -LogOnly
-            
-            Invoke-MgGraphRequest -Method POST -Uri $assignUrl -Body $body
-            Write-LogMessage -Message "Successfully updated assignments for policy '$policyName'" -Type Success
         }
+        
+        return $successCount -gt 0
     }
     catch {
-        Write-LogMessage -Message "Error updating existing policy assignments: $($_.Exception.Message)" -Type Error
-        Write-LogMessage -Message "Full error details: $($_.Exception.ToString())" -Type Error -LogOnly
+        Write-LogMessage -Message "Error in update existing policy assignments: $($_.Exception.Message)" -Type Error
+        return $false
+    }
+}
+function Test-GroupExists {
+    <#
+    .SYNOPSIS
+    Verifies that a group exists and is accessible
+    #>
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$GroupName,
+        
+        [Parameter(Mandatory = $false)]
+        [string]$GroupId
+    )
+    
+    try {
+        if (-not $GroupId -and $script:TenantState.CreatedGroups.ContainsKey($GroupName)) {
+            $GroupId = $script:TenantState.CreatedGroups[$GroupName]
+        }
+        
+        if (-not $GroupId) {
+            Write-LogMessage -Message "Group '$GroupName' not found in created groups list" -Type Warning -LogOnly
+            return $false
+        }
+        
+        # Test if group actually exists in Azure AD
+        $group = Get-MgGroup -GroupId $GroupId -ErrorAction Stop
+        Write-LogMessage -Message "Confirmed group '$GroupName' exists (ID: $GroupId)" -Type Success -LogOnly
+        return $true
+    }
+    catch {
+        Write-LogMessage -Message "Group '$GroupName' with ID '$GroupId' does not exist or is not accessible: $($_.Exception.Message)" -Type Error
+        return $false
     }
 }
 
+function Wait-ForGroupPropagation {
+    <#
+    .SYNOPSIS
+    Waits for newly created groups to propagate before attempting assignments
+    #>
+    param (
+        [Parameter(Mandatory = $true)]
+        [array]$GroupNames,
+        
+        [Parameter(Mandatory = $false)]
+        [int]$MaxWaitSeconds = 120
+    )
+    
+    Write-LogMessage -Message "Waiting for group propagation before policy assignments..." -Type Info
+    
+    $startTime = Get-Date
+    $allGroupsReady = $false
+    $checkInterval = 10 # seconds
+    
+    while (-not $allGroupsReady -and ((Get-Date) - $startTime).TotalSeconds -lt $MaxWaitSeconds) {
+        $readyGroups = 0
+        
+        foreach ($groupName in $GroupNames) {
+            if (Test-GroupExists -GroupName $groupName) {
+                $readyGroups++
+            }
+        }
+        
+        if ($readyGroups -eq $GroupNames.Count) {
+            $allGroupsReady = $true
+            Write-LogMessage -Message "All groups are ready for assignment" -Type Success
+        }
+        else {
+            $waitTime = [math]::Min($checkInterval, $MaxWaitSeconds - ((Get-Date) - $startTime).TotalSeconds)
+            Write-LogMessage -Message "Groups ready: $readyGroups/$($GroupNames.Count). Waiting $waitTime more seconds..." -Type Info
+            Start-Sleep -Seconds $waitTime
+        }
+    }
+    
+    if (-not $allGroupsReady) {
+        Write-LogMessage -Message "Timeout waiting for group propagation after $MaxWaitSeconds seconds" -Type Warning
+    }
+    
+    return $allGroupsReady
+}
+
+function Assign-PoliciesWithWait {
+    <#
+    .SYNOPSIS
+    Assigns policies to groups with proper waiting and error handling
+    #>
+    param (
+        [Parameter(Mandatory = $false)]
+        [array]$NewPolicies = @(),
+        
+        [Parameter(Mandatory = $false)]
+        [array]$ExistingPolicyNames = @(),
+        
+        [Parameter(Mandatory = $true)]
+        [array]$GroupNames,
+        
+        [Parameter(Mandatory = $false)]
+        [bool]$UpdateExistingPolicies = $true
+    )
+    
+    Write-LogMessage -Message "Starting policy assignment process..." -Type Info
+    
+    # Wait for group propagation first
+    $groupsReady = Wait-ForGroupPropagation -GroupNames $GroupNames -MaxWaitSeconds 120
+    
+    if (-not $groupsReady) {
+        Write-LogMessage -Message "Proceeding with assignments despite group propagation timeout" -Type Warning
+    }
+    
+    $totalSuccess = 0
+    $totalFailed = 0
+    
+    # Assign new policies
+    if ($NewPolicies.Count -gt 0) {
+        foreach ($policy in $NewPolicies) {
+            if ($policy -and $policy.id -and $policy.id -ne "existing") {
+                $policyName = if ($policy.name) { $policy.name } else { "Policy ID: $($policy.id)" }
+                
+                $success = Assign-PolicyToGroups -PolicyId $policy.id -GroupNames $GroupNames -PolicyName $policyName
+                if ($success) { $totalSuccess++ } else { $totalFailed++ }
+                
+                # Small delay between assignments
+                Start-Sleep -Milliseconds 500
+            }
+        }
+    }
+    
+    # Update existing policies
+    if ($ExistingPolicyNames.Count -gt 0 -and $UpdateExistingPolicies) {
+        $success = Update-ExistingPolicyAssignments -PolicyNames $ExistingPolicyNames -GroupNames $GroupNames
+        if ($success) { $totalSuccess++ } else { $totalFailed++ }
+    }
+    
+    return @{
+        Success = $totalSuccess
+        Failed = $totalFailed
+        Total = $totalSuccess + $totalFailed
+    }
+}
 Write-LogMessage -Message "Complete corrected Intune script loaded - use New-TenantIntune to run" -Type Info
