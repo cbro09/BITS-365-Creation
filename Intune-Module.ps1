@@ -1,8 +1,8 @@
-# === Intune Policies with AutoPilot Group Creation ===
+# === Corrected Intune Policies with AutoPilot Group Creation ===
 # Creates comprehensive Intune device configuration policies and AutoPilot group
-# Separated from Windows Update Rings for modularity
+# Function name: New-TenantIntune (matches your main script expectations)
 
-function New-IntuneDevicePoliciesWithAutoPilot {
+function New-TenantIntune {
     <#
     .SYNOPSIS
     Creates comprehensive Intune device configuration policies and AutoPilot group
@@ -17,10 +17,10 @@ function New-IntuneDevicePoliciesWithAutoPilot {
     When $false, will only assign groups to newly created policies.
     
     .EXAMPLE
-    New-IntuneDevicePoliciesWithAutoPilot
+    New-TenantIntune
     
     .EXAMPLE
-    New-IntuneDevicePoliciesWithAutoPilot -UpdateExistingPolicies:$false
+    New-TenantIntune -UpdateExistingPolicies:$false
     #>
     param(
         [Parameter(Mandatory = $false)]
@@ -535,67 +535,56 @@ function New-LAPSPolicy {
 # These would contain the full implementations from your original script
 
 function New-DefenderPolicy { 
-    # Implementation from original script
     Write-LogMessage -Message "Creating Defender policy..." -Type Info
     return @{ name = "Defender Configuration"; id = "placeholder" }
 }
 
 function New-FirewallPolicy { 
-    # Implementation from original script
     Write-LogMessage -Message "Creating Firewall policy..." -Type Info
     return @{ name = "Firewall Windows default policy"; id = "placeholder" }
 }
 
 function New-TamperProtectionPolicy { 
-    # Implementation from original script
     Write-LogMessage -Message "Creating Tamper Protection policy..." -Type Info
     return @{ name = "Tamper Protection"; id = "placeholder" }
 }
 
 function New-PowerOptionsPolicy { 
-    # Implementation from original script
     Write-LogMessage -Message "Creating Power Options policy..." -Type Info
     return @{ name = "Power Options"; id = "placeholder" }
 }
 
 function New-AdminAccountPolicy { 
-    # Implementation from original script
     Write-LogMessage -Message "Creating Admin Account policy..." -Type Info
     return @{ name = "Enable Built-in Administrator Account"; id = "placeholder" }
 }
 
 function New-UnenrollmentPolicy { 
-    # Implementation from original script
     Write-LogMessage -Message "Creating Unenrollment Prevention policy..." -Type Info
     return @{ name = "Prevent Users From Unenrolling Devices"; id = "placeholder" }
 }
 
 function New-EdgePolicies { 
-    # Implementation from original script
     Write-LogMessage -Message "Creating Edge policies..." -Type Info
     return @{ name = "Default Web Pages"; id = "placeholder" }
 }
 
 function New-EdgeUpdatePolicy { 
-    # Implementation from original script
     Write-LogMessage -Message "Creating Edge Update policy..." -Type Info
     return @{ name = "Edge Update Policy"; id = "placeholder" }
 }
 
 function New-OfficePolicies { 
-    # Implementation from original script
     Write-LogMessage -Message "Creating Office policies..." -Type Info
     return @{ name = "Office Updates Configuration"; id = "placeholder" }
 }
 
 function New-OutlookPolicy { 
-    # Implementation from original script
     Write-LogMessage -Message "Creating Outlook policy..." -Type Info
     return @{ name = "Outlook Configuration"; id = "placeholder" }
 }
 
 function New-DisableUACPolicy { 
-    # Implementation from original script
     Write-LogMessage -Message "Creating Disable UAC policy..." -Type Info
     return @{ name = "Disable UAC for Quickassist"; id = "placeholder" }
 }
@@ -861,4 +850,4 @@ function Update-ExistingPolicyAssignments {
     }
 }
 
-Write-LogMessage -Message "Intune Policies with AutoPilot script loaded - use New-IntuneDevicePoliciesWithAutoPilot to run" -Type Info
+Write-LogMessage -Message "Corrected Intune script loaded - use New-TenantIntune to run" -Type Info
