@@ -1,16 +1,15 @@
-# === Complete Intune Script with All Policies and AutoPilot Group ===
-# Creates comprehensive Intune device configuration policies and AutoPilot group
-# Contains ALL policies and settings from the original script
+# === Intune.ps1 ===
+# Microsoft Intune configuration and policy management functions - Complete Policies
 
 function New-TenantIntune {
     <#
     .SYNOPSIS
-    Creates comprehensive Intune device configuration policies and AutoPilot group
+    Creates and configures comprehensive Intune device configuration policies
     
     .DESCRIPTION
-    Creates a complete set of Intune device configuration policies including security, 
+    Sets up a complete set of Intune device configuration policies including security, 
     BitLocker, OneDrive, Edge, and other essential device management policies.
-    Also creates the WindowsAutoPilot dynamic group and assigns all policies to it.
+    Automatically assigns policies to device groups including Windows AutoPilot devices.
     
     .PARAMETER UpdateExistingPolicies
     When $true (default), will update group assignments for existing policies to include new groups.
@@ -18,9 +17,11 @@ function New-TenantIntune {
     
     .EXAMPLE
     New-TenantIntune
+    Creates policies and updates existing policy assignments
     
     .EXAMPLE
     New-TenantIntune -UpdateExistingPolicies:$false
+    Creates policies but skips updating existing policy assignments
     #>
     param(
         [Parameter(Mandatory = $false)]
@@ -99,6 +100,7 @@ function New-TenantIntune {
             Write-LogMessage -Message "Failed to create WindowsAutoPilot group" -Type Warning
         }
         
+        
         # Enable LAPS prerequisite
         $lapsEnabled = Enable-WindowsLAPS
         if (-not $lapsEnabled) {
@@ -147,42 +149,20 @@ function New-TenantIntune {
         Write-LogMessage -Message "Assigning policies to WindowsAutoPilot group only..." -Type Info
         $deviceGroups = @("WindowsAutoPilot")
         
-        # CORRECTED: Verify all target groups exist before assignment
-        $validGroups = @()
-        foreach ($groupName in $deviceGroups) {
-            if (Test-GroupExists -GroupName $groupName) {
-                $validGroups += $groupName
-            }
-            else {
-                Write-LogMessage -Message "Warning: Group '$groupName' not found or not accessible - skipping from assignments" -Type Warning
-            }
+        # Assign new policies
+        foreach ($policy in $newPolicies) {
+            Assign-PolicyToGroups -PolicyId $policy.id -GroupNames $deviceGroups
         }
         
-        if ($validGroups.Count -eq 0) {
-            Write-LogMessage -Message "No valid groups found for assignment - policies created but not assigned" -Type Warning
-            Write-LogMessage -Message "Intune configuration completed with warnings" -Type Warning
-            return $true
+        # Update existing policies with AutoPilot group assignment (if requested)
+        if ($existingPolicyNames.Count -gt 0 -and $UpdateExistingPolicies) {
+            Write-LogMessage -Message "Updating assignments for $($existingPolicyNames.Count) existing policies..." -Type Info
+            Write-LogMessage -Message "Existing policies: $($existingPolicyNames -join ', ')" -Type Info
+            Update-ExistingPolicyAssignments -PolicyNames $existingPolicyNames -GroupNames $deviceGroups
         }
-        
-        # CORRECTED: Use the new assignment function with proper waiting and error handling
-        Write-LogMessage -Message "Starting policy assignments to groups: $($validGroups -join ', ')..." -Type Info
-        
-        $assignmentResults = Assign-PoliciesWithWait `
-            -NewPolicies $newPolicies `
-            -ExistingPolicyNames $existingPolicyNames `
-            -GroupNames $validGroups `
-            -UpdateExistingPolicies $UpdateExistingPolicies
-        
-        # Enhanced logging with detailed results
-        Write-LogMessage -Message "Policy assignment completed!" -Type Success
-        Write-LogMessage -Message "Assignment Results:" -Type Info
-        Write-LogMessage -Message "  - Successful assignments: $($assignmentResults.Success)" -Type Info
-        Write-LogMessage -Message "  - Failed assignments: $($assignmentResults.Failed)" -Type Info
-        Write-LogMessage -Message "  - Total operations: $($assignmentResults.Total)" -Type Info
-        Write-LogMessage -Message "  - Target groups: $($validGroups -join ', ')" -Type Info
-        
-        if ($assignmentResults.Failed -gt 0) {
-            Write-LogMessage -Message "Some assignments failed. Check log details above for specific errors." -Type Warning
+        elseif ($existingPolicyNames.Count -gt 0 -and -not $UpdateExistingPolicies) {
+            Write-LogMessage -Message "Found $($existingPolicyNames.Count) existing policies, but update mode is disabled" -Type Warning
+            Write-LogMessage -Message "Existing policies: $($existingPolicyNames -join ', ')" -Type Info
         }
         
         Write-LogMessage -Message "Intune configuration completed successfully" -Type Success
@@ -190,12 +170,11 @@ function New-TenantIntune {
     }
     catch {
         Write-LogMessage -Message "Error in Intune configuration - $($_.Exception.Message)" -Type Error
-        Write-LogMessage -Message "Full error details: $($_.Exception.ToString())" -Type Error -LogOnly
         return $false
     }
 }
 
-# === AutoPilot Group Creation Function ===
+# === Group Creation Functions ===
 
 function New-WindowsAutoPilotGroup {
     Write-LogMessage -Message "Creating WindowsAutoPilot dynamic group..." -Type Info
@@ -206,9 +185,6 @@ function New-WindowsAutoPilotGroup {
         if ($existingGroup) {
             Write-LogMessage -Message "WindowsAutoPilot group already exists" -Type Warning
             # Store in TenantState for policy assignments
-            if (-not $script:TenantState) {
-                $script:TenantState = @{ CreatedGroups = @{} }
-            }
             $script:TenantState.CreatedGroups["WindowsAutoPilot"] = $existingGroup.Id
             return $existingGroup
         }
@@ -228,9 +204,6 @@ function New-WindowsAutoPilotGroup {
         Write-LogMessage -Message "Created WindowsAutoPilot dynamic group" -Type Success
         
         # Store in TenantState for policy assignments
-        if (-not $script:TenantState) {
-            $script:TenantState = @{ CreatedGroups = @{} }
-        }
         $script:TenantState.CreatedGroups["WindowsAutoPilot"] = $result.id
         
         return $result
@@ -241,7 +214,34 @@ function New-WindowsAutoPilotGroup {
     }
 }
 
-# === COMPLETE Policy Creation Functions with ALL Settings ===
+function Enable-WindowsLAPS {
+    Write-LogMessage -Message "Checking Windows LAPS prerequisite..." -Type Info
+    
+    try {
+        $lapsSettings = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/beta/policies/deviceRegistrationPolicy" -ErrorAction SilentlyContinue
+        
+        if ($lapsSettings -and $lapsSettings.localAdminPassword -and $lapsSettings.localAdminPassword.isEnabled) {
+            Write-LogMessage -Message "Windows LAPS is already enabled" -Type Info
+            return $true
+        }
+        
+        $body = @{
+            localAdminPassword = @{
+                isEnabled = $true
+            }
+        }
+        
+        Invoke-MgGraphRequest -Method PATCH -Uri "https://graph.microsoft.com/beta/policies/deviceRegistrationPolicy" -Body $body
+        Write-LogMessage -Message "Windows LAPS has been enabled" -Type Success
+        return $true
+    }
+    catch {
+        Write-LogMessage -Message "Failed to enable Windows LAPS - $($_.Exception.Message)" -Type Error
+        return $false
+    }
+}
+
+# === Complete Policy Creation Functions with Existence Checks ===
 
 function New-PowerOptionsPolicy {
     Write-LogMessage -Message "Creating complete Power Options policy..." -Type Info
@@ -263,6 +263,7 @@ function New-PowerOptionsPolicy {
                 templateFamily = "none"
             }
             settings = @(
+                # Allow Hibernate
                 @{
                     id = "0"
                     settingInstance = @{
@@ -274,6 +275,7 @@ function New-PowerOptionsPolicy {
                         }
                     }
                 },
+                # Lid close action on battery (Sleep)
                 @{
                     id = "1"
                     settingInstance = @{
@@ -285,6 +287,7 @@ function New-PowerOptionsPolicy {
                         }
                     }
                 },
+                # Lid close action plugged in (Sleep)
                 @{
                     id = "2"
                     settingInstance = @{
@@ -296,6 +299,7 @@ function New-PowerOptionsPolicy {
                         }
                     }
                 },
+                # Power button action on battery (Do nothing)
                 @{
                     id = "3"
                     settingInstance = @{
@@ -307,6 +311,7 @@ function New-PowerOptionsPolicy {
                         }
                     }
                 },
+                # Power button action plugged in (Do nothing)
                 @{
                     id = "4"
                     settingInstance = @{
@@ -318,6 +323,7 @@ function New-PowerOptionsPolicy {
                         }
                     }
                 },
+                # Unattended sleep timeout plugged in (15 minutes = 900 seconds)
                 @{
                     id = "5"
                     settingInstance = @{
@@ -883,6 +889,7 @@ function New-BitLockerPolicy {
                 templateFamily = "none"
             }
             settings = @(
+                # Require Device Encryption
                 @{
                     id = "0"
                     settingInstance = @{
@@ -894,6 +901,7 @@ function New-BitLockerPolicy {
                         }
                     }
                 },
+                # Allow warning for other disk encryption
                 @{
                     id = "1"
                     settingInstance = @{
@@ -914,6 +922,7 @@ function New-BitLockerPolicy {
                         }
                     }
                 },
+                # Configure recovery password rotation
                 @{
                     id = "2"
                     settingInstance = @{
@@ -925,6 +934,7 @@ function New-BitLockerPolicy {
                         }
                     }
                 },
+                # Encryption method by drive type
                 @{
                     id = "3"
                     settingInstance = @{
@@ -961,6 +971,7 @@ function New-BitLockerPolicy {
                         }
                     }
                 },
+                # System drives encryption type
                 @{
                     id = "4"
                     settingInstance = @{
@@ -981,6 +992,7 @@ function New-BitLockerPolicy {
                         }
                     }
                 },
+                # System drives require startup authentication
                 @{
                     id = "5"
                     settingInstance = @{
@@ -1033,6 +1045,7 @@ function New-BitLockerPolicy {
                         }
                     }
                 },
+                # System drives minimum PIN length
                 @{
                     id = "6"
                     settingInstance = @{
@@ -1044,6 +1057,7 @@ function New-BitLockerPolicy {
                         }
                     }
                 },
+                # System drives enhanced PIN
                 @{
                     id = "7"
                     settingInstance = @{
@@ -1055,6 +1069,7 @@ function New-BitLockerPolicy {
                         }
                     }
                 },
+                # System drives recovery options
                 @{
                     id = "8"
                     settingInstance = @{
@@ -1123,6 +1138,7 @@ function New-BitLockerPolicy {
                         }
                     }
                 },
+                # Fixed drives encryption type
                 @{
                     id = "9"
                     settingInstance = @{
@@ -1143,6 +1159,7 @@ function New-BitLockerPolicy {
                         }
                     }
                 },
+                # Fixed drives recovery options
                 @{
                     id = "10"
                     settingInstance = @{
@@ -1211,6 +1228,7 @@ function New-BitLockerPolicy {
                         }
                     }
                 },
+                # Removable drives configure BDE
                 @{
                     id = "11"
                     settingInstance = @{
@@ -1257,6 +1275,7 @@ function New-BitLockerPolicy {
                         }
                     }
                 },
+                # Removable drives require encryption
                 @{
                     id = "12"
                     settingInstance = @{
@@ -1310,6 +1329,7 @@ function New-OneDrivePolicy {
                 templateFamily = "none"
             }
             settings = @(
+                # Disable pause on metered networks
                 @{
                     id = "0"
                     settingInstance = @{
@@ -1321,6 +1341,7 @@ function New-OneDrivePolicy {
                         }
                     }
                 },
+                # Block opt-out from KFM
                 @{
                     id = "1"
                     settingInstance = @{
@@ -1332,6 +1353,7 @@ function New-OneDrivePolicy {
                         }
                     }
                 },
+                # Disable personal sync
                 @{
                     id = "2"
                     settingInstance = @{
@@ -1343,6 +1365,7 @@ function New-OneDrivePolicy {
                         }
                     }
                 },
+                # Force local mass delete detection
                 @{
                     id = "3"
                     settingInstance = @{
@@ -1354,6 +1377,7 @@ function New-OneDrivePolicy {
                         }
                     }
                 },
+                # KFM Opt-in with Desktop, Documents, Pictures
                 @{
                     id = "4"
                     settingInstance = @{
@@ -1406,6 +1430,7 @@ function New-OneDrivePolicy {
                         }
                     }
                 },
+                # Silent Account Config
                 @{
                     id = "5"
                     settingInstance = @{
@@ -1417,6 +1442,7 @@ function New-OneDrivePolicy {
                         }
                     }
                 },
+                # Files on Demand
                 @{
                     id = "6"
                     settingInstance = @{
@@ -1437,6 +1463,107 @@ function New-OneDrivePolicy {
     }
     catch {
         Write-LogMessage -Message "Failed to create OneDrive policy - $($_.Exception.Message)" -Type Error
+        return $null
+    }
+}
+
+function New-EdgePolicies {
+    Write-LogMessage -Message "Creating Edge policy with SharePoint homepage..." -Type Info
+    
+    $policyName = "Default Web Pages"
+    if (Test-PolicyExists -PolicyName $policyName) {
+        Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
+        return @{ name = $policyName; id = "existing" }
+    }
+    
+    try {
+        # Get SharePoint root site URL from tenant
+        $sharePointUrl = Get-SharePointRootSiteUrl
+        
+        $body = @{
+            name = $policyName
+            description = "Setting SharePoint home page as default start up page"
+            platforms = "windows10"
+            technologies = "mdm"
+            templateReference = @{
+                templateId = ""
+                templateFamily = "none"
+            }
+            settings = @(
+                # Restore on startup
+                @{
+                    id = "0"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                        settingDefinitionId = "device_vendor_msft_policy_config_microsoft_edgev77.3~policy~microsoft_edge~startup_restoreonstartup"
+                        choiceSettingValue = @{
+                            value = "device_vendor_msft_policy_config_microsoft_edgev77.3~policy~microsoft_edge~startup_restoreonstartup_1"
+                            children = @(
+                                @{
+                                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                                    settingDefinitionId = "device_vendor_msft_policy_config_microsoft_edgev77.3~policy~microsoft_edge~startup_restoreonstartup_restoreonstartup"
+                                    choiceSettingValue = @{
+                                        value = "device_vendor_msft_policy_config_microsoft_edgev77.3~policy~microsoft_edge~startup_restoreonstartup_restoreonstartup_5"
+                                        children = @()
+                                    }
+                                }
+                            )
+                        }
+                    }
+                },
+                # Home page location
+                @{
+                    id = "1"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                        settingDefinitionId = "device_vendor_msft_policy_config_microsoft_edge~policy~microsoft_edge~startup_homepagelocation"
+                        choiceSettingValue = @{
+                            value = "device_vendor_msft_policy_config_microsoft_edge~policy~microsoft_edge~startup_homepagelocation_1"
+                            children = @(
+                                @{
+                                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance"
+                                    settingDefinitionId = "device_vendor_msft_policy_config_microsoft_edge~policy~microsoft_edge~startup_homepagelocation_homepagelocation"
+                                    simpleSettingValue = @{
+                                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationStringSettingValue"
+                                        value = $sharePointUrl
+                                    }
+                                }
+                            )
+                        }
+                    }
+                },
+                # Restore on startup URLs
+                @{
+                    id = "2"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                        settingDefinitionId = "device_vendor_msft_policy_config_microsoft_edge~policy~microsoft_edge~startup_restoreonstartupurls"
+                        choiceSettingValue = @{
+                            value = "device_vendor_msft_policy_config_microsoft_edge~policy~microsoft_edge~startup_restoreonstartupurls_1"
+                            children = @(
+                                @{
+                                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationSimpleSettingCollectionInstance"
+                                    settingDefinitionId = "device_vendor_msft_policy_config_microsoft_edge~policy~microsoft_edge~startup_restoreonstartupurls_restoreonstartupurlsdesc"
+                                    simpleSettingCollectionValue = @(
+                                        @{
+                                            "@odata.type" = "#microsoft.graph.deviceManagementConfigurationStringSettingValue"
+                                            value = $sharePointUrl
+                                        }
+                                    )
+                                }
+                            )
+                        }
+                    }
+                }
+            )
+        }
+        
+        $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" -Body $body
+        Write-LogMessage -Message "Created Edge policy with SharePoint home page: $sharePointUrl" -Type Success
+        return $result
+    }
+    catch {
+        Write-LogMessage -Message "Failed to create Edge policies - $($_.Exception.Message)" -Type Error
         return $null
     }
 }
@@ -1604,42 +1731,98 @@ function New-LAPSPolicy {
     }
 }
 
-function New-EdgePolicies {
-    Write-LogMessage -Message "Creating Edge policy with SharePoint homepage..." -Type Info
+# === Remaining Policy Functions with Existence Checks ===
+
+function New-DefenderPolicy {
+    Write-LogMessage -Message "Creating comprehensive Defender policy..." -Type Info
     
-    $policyName = "Default Web Pages"
+    $policyName = "Defender Configuration"
     if (Test-PolicyExists -PolicyName $policyName) {
         Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
         return @{ name = $policyName; id = "existing" }
     }
     
     try {
-        # Get SharePoint root site URL from tenant
-        $sharePointUrl = Get-SharePointRootSiteUrl
-        
         $body = @{
             name = $policyName
-            description = "Setting SharePoint home page as default start up page"
+            description = "Microsoft Defender comprehensive security configuration"
             platforms = "windows10"
             technologies = "mdm"
+            settings = @(
+                @{
+                    id = "0"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                        settingDefinitionId = "device_vendor_msft_policy_config_defender_allowintrusionpreventionsystem"
+                        choiceSettingValue = @{
+                            value = "device_vendor_msft_policy_config_defender_allowintrusionpreventionsystem_1"
+                            children = @()
+                        }
+                    }
+                }
+            )
+        }
+        
+        $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" -Body $body
+        Write-LogMessage -Message "Created Defender policy" -Type Success
+        return $result
+    }
+    catch {
+        Write-LogMessage -Message "Failed to create Defender policy - $($_.Exception.Message)" -Type Error
+        return $null
+    }
+}
+
+function New-FirewallPolicy {
+    Write-LogMessage -Message "Creating Windows Firewall policy with template..." -Type Info
+    
+    $policyName = "Firewall Windows default policy"
+    if (Test-PolicyExists -PolicyName $policyName) {
+        Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
+        return @{ name = $policyName; id = "existing" }
+    }
+    
+    try {
+        $body = @{
+            name = $policyName
+            description = "Default policy sets settings for all endpoints that are not governed by any other policy, ensuring that all your clients are managed as soon as MDE is deployed. The default policy is based on a set of pre-configured recommended settings and can be adjusted by user with admin priviledges."
+            platforms = "windows10"
+            technologies = "mdm,microsoftSense"
             templateReference = @{
-                templateId = ""
-                templateFamily = "none"
+                templateId = "6078910e-d808-4a9f-a51d-1b8a7bacb7c0_1"
+                templateFamily = "endpointSecurityFirewall"
+                templateDisplayName = "Windows Firewall"
+                templateDisplayVersion = "Version 1"
             }
             settings = @(
                 @{
                     id = "0"
                     settingInstance = @{
                         "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_microsoft_edgev77.3~policy~microsoft_edge~startup_restoreonstartup"
+                        settingDefinitionId = "vendor_msft_firewall_mdmstore_domainprofile_enablefirewall"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "7714c373-a19a-4b64-ba6d-2e9db04a7684"
+                        }
                         choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_microsoft_edgev77.3~policy~microsoft_edge~startup_restoreonstartup_1"
+                            value = "vendor_msft_firewall_mdmstore_domainprofile_enablefirewall_true"
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "120c5dbe-0c88-46f0-b897-2c996d3e5277"
+                                useTemplateDefault = $false
+                            }
                             children = @(
                                 @{
                                     "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                                    settingDefinitionId = "device_vendor_msft_policy_config_microsoft_edgev77.3~policy~microsoft_edge~startup_restoreonstartup_restoreonstartup"
+                                    settingDefinitionId = "vendor_msft_firewall_mdmstore_domainprofile_defaultinboundaction"
                                     choiceSettingValue = @{
-                                        value = "device_vendor_msft_policy_config_microsoft_edgev77.3~policy~microsoft_edge~startup_restoreonstartup_restoreonstartup_5"
+                                        value = "vendor_msft_firewall_mdmstore_domainprofile_defaultinboundaction_1"
+                                        children = @()
+                                    }
+                                },
+                                @{
+                                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                                    settingDefinitionId = "vendor_msft_firewall_mdmstore_domainprofile_defaultoutboundaction"
+                                    choiceSettingValue = @{
+                                        value = "vendor_msft_firewall_mdmstore_domainprofile_defaultoutboundaction_0"
                                         children = @()
                                     }
                                 }
@@ -1651,16 +1834,31 @@ function New-EdgePolicies {
                     id = "1"
                     settingInstance = @{
                         "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_microsoft_edge~policy~microsoft_edge~startup_homepagelocation"
+                        settingDefinitionId = "vendor_msft_firewall_mdmstore_privateprofile_enablefirewall"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "1c14f914-69bb-49f8-af5b-e29173a6ee95"
+                        }
                         choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_microsoft_edge~policy~microsoft_edge~startup_homepagelocation_1"
+                            value = "vendor_msft_firewall_mdmstore_privateprofile_enablefirewall_true"
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "9d55dfae-d55f-4f2a-af03-9a9524f61e76"
+                                useTemplateDefault = $false
+                            }
                             children = @(
                                 @{
-                                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance"
-                                    settingDefinitionId = "device_vendor_msft_policy_config_microsoft_edge~policy~microsoft_edge~startup_homepagelocation_homepagelocation"
-                                    simpleSettingValue = @{
-                                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationStringSettingValue"
-                                        value = $sharePointUrl
+                                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                                    settingDefinitionId = "vendor_msft_firewall_mdmstore_privateprofile_defaultinboundaction"
+                                    choiceSettingValue = @{
+                                        value = "vendor_msft_firewall_mdmstore_privateprofile_defaultinboundaction_1"
+                                        children = @()
+                                    }
+                                },
+                                @{
+                                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                                    settingDefinitionId = "vendor_msft_firewall_mdmstore_privateprofile_defaultoutboundaction"
+                                    choiceSettingValue = @{
+                                        value = "vendor_msft_firewall_mdmstore_privateprofile_defaultoutboundaction_0"
+                                        children = @()
                                     }
                                 }
                             )
@@ -1671,19 +1869,32 @@ function New-EdgePolicies {
                     id = "2"
                     settingInstance = @{
                         "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_microsoft_edge~policy~microsoft_edge~startup_restoreonstartupurls"
+                        settingDefinitionId = "vendor_msft_firewall_mdmstore_publicprofile_enablefirewall"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "e2714734-708e-4286-8ae9-d56821e306a3"
+                        }
                         choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_microsoft_edge~policy~microsoft_edge~startup_restoreonstartupurls_1"
+                            value = "vendor_msft_firewall_mdmstore_publicprofile_enablefirewall_true"
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "c38694c7-51a4-4a35-8f64-b10866a04776"
+                                useTemplateDefault = $false
+                            }
                             children = @(
                                 @{
-                                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationSimpleSettingCollectionInstance"
-                                    settingDefinitionId = "device_vendor_msft_policy_config_microsoft_edge~policy~microsoft_edge~startup_restoreonstartupurls_restoreonstartupurlsdesc"
-                                    simpleSettingCollectionValue = @(
-                                        @{
-                                            "@odata.type" = "#microsoft.graph.deviceManagementConfigurationStringSettingValue"
-                                            value = $sharePointUrl
-                                        }
-                                    )
+                                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                                    settingDefinitionId = "vendor_msft_firewall_mdmstore_publicprofile_defaultinboundaction"
+                                    choiceSettingValue = @{
+                                        value = "vendor_msft_firewall_mdmstore_publicprofile_defaultinboundaction_1"
+                                        children = @()
+                                    }
+                                },
+                                @{
+                                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                                    settingDefinitionId = "vendor_msft_firewall_mdmstore_publicprofile_defaultoutboundaction"
+                                    choiceSettingValue = @{
+                                        value = "vendor_msft_firewall_mdmstore_publicprofile_defaultoutboundaction_0"
+                                        children = @()
+                                    }
                                 }
                             )
                         }
@@ -1693,16 +1904,244 @@ function New-EdgePolicies {
         }
         
         $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" -Body $body
-        Write-LogMessage -Message "Created Edge policy with SharePoint home page: $sharePointUrl" -Type Success
+        Write-LogMessage -Message "Created Windows Firewall policy with template references" -Type Success
         return $result
     }
     catch {
-        Write-LogMessage -Message "Failed to create Edge policies - $($_.Exception.Message)" -Type Error
+        Write-LogMessage -Message "Failed to create Windows Firewall policy - $($_.Exception.Message)" -Type Error
         return $null
     }
 }
 
-# Continuation of the Intune script - Complete Edge Update Policy and add remaining policies
+function New-TamperProtectionPolicy {
+    Write-LogMessage -Message "Creating Tamper Protection policy..." -Type Info
+    
+    $policyName = "Tamper Protection"
+    if (Test-PolicyExists -PolicyName $policyName) {
+        Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
+        return @{ name = $policyName; id = "existing" }
+    }
+    
+    try {
+        $body = @{
+            name = $policyName
+            description = "Windows Security tamper protection configuration"
+            platforms = "windows10"
+            technologies = "mdm,microsoftSense"
+            templateReference = @{
+                templateId = "d948ff9b-99cb-4ee0-8012-1fbc09685377_1"
+                templateFamily = "endpointSecurityAntivirus"
+                templateDisplayName = "Windows Security Experience"
+                templateDisplayVersion = "Version 1"
+            }
+            settings = @(
+                @{
+                    id = "0"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                        settingDefinitionId = "vendor_msft_defender_configuration_tamperprotection_options"
+                        settingInstanceTemplateReference = @{
+                            settingInstanceTemplateId = "5655cab2-7e6b-4c49-9ce2-3865da05f7e6"
+                        }
+                        choiceSettingValue = @{
+                            value = "vendor_msft_defender_configuration_tamperprotection_options_0"
+                            settingValueTemplateReference = @{
+                                settingValueTemplateId = "fc365da9-2c1b-4f79-aa4b-dedca69e728f"
+                                useTemplateDefault = $false
+                            }
+                            children = @()
+                        }
+                    }
+                }
+            )
+        }
+        
+        $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" -Body $body
+        Write-LogMessage -Message "Created Tamper Protection policy" -Type Success
+        return $result
+    }
+    catch {
+        Write-LogMessage -Message "Failed to create Tamper Protection policy - $($_.Exception.Message)" -Type Error
+        return $null
+    }
+}
+
+function New-AdminAccountPolicy {
+    Write-LogMessage -Message "Creating Admin Account policy with rename..." -Type Info
+    
+    $policyName = "Enable Built-in Administrator Account"
+    if (Test-PolicyExists -PolicyName $policyName) {
+        Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
+        return @{ name = $policyName; id = "existing" }
+    }
+    
+    try {
+        $body = @{
+            name = $policyName
+            description = "Enable and configure built-in administrator account for LAPS"
+            platforms = "windows10"
+            technologies = "mdm"
+            templateReference = @{
+                templateId = ""
+                templateFamily = "none"
+            }
+            settings = @(
+                # Enable Administrator Account
+                @{
+                    id = "0"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                        settingDefinitionId = "device_vendor_msft_policy_config_localpoliciessecurityoptions_accounts_enableadministratoraccountstatus"
+                        choiceSettingValue = @{
+                            value = "device_vendor_msft_policy_config_localpoliciessecurityoptions_accounts_enableadministratoraccountstatus_1"
+                            children = @()
+                        }
+                    }
+                },
+                # Rename Administrator Account
+                @{
+                    id = "1"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance"
+                        settingDefinitionId = "device_vendor_msft_policy_config_localpoliciessecurityoptions_accounts_renameadministratoraccount"
+                        simpleSettingValue = @{
+                            "@odata.type" = "#microsoft.graph.deviceManagementConfigurationStringSettingValue"
+                            value = "localadmin"
+                        }
+                    }
+                }
+            )
+        }
+        
+        $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" -Body $body
+        Write-LogMessage -Message "Created Admin Account policy with rename setting" -Type Success
+        return $result
+    }
+    catch {
+        Write-LogMessage -Message "Failed to create Admin Account policy - $($_.Exception.Message)" -Type Error
+        return $null
+    }
+}
+
+function New-UnenrollmentPolicy {
+    Write-LogMessage -Message "Creating Device Unenrollment Prevention policy..." -Type Info
+    
+    $policyName = "Prevent Users From Unenrolling Devices"
+    if (Test-PolicyExists -PolicyName $policyName) {
+        Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
+        return @{ name = $policyName; id = "existing" }
+    }
+    
+    try {
+        $body = @{
+            name = $policyName
+            description = "Prevent users from manually unenrolling devices from Intune"
+            platforms = "windows10"
+            technologies = "mdm"
+            settings = @(
+                @{
+                    id = "0"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                        settingDefinitionId = "device_vendor_msft_policy_config_experience_allowmanualmdmunenrollment"
+                        choiceSettingValue = @{
+                            value = "device_vendor_msft_policy_config_experience_allowmanualmdmunenrollment_0"
+                            children = @()
+                        }
+                    }
+                }
+            )
+        }
+        
+        $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" -Body $body
+        Write-LogMessage -Message "Created Device Unenrollment Prevention policy" -Type Success
+        return $result
+    }
+    catch {
+        Write-LogMessage -Message "Failed to create Unenrollment Prevention policy - $($_.Exception.Message)" -Type Error
+        return $null
+    }
+}
+
+function New-OfficePolicies {
+    Write-LogMessage -Message "Creating Office configuration policies..." -Type Info
+    
+    $policyName = "Office Updates Configuration"
+    if (Test-PolicyExists -PolicyName $policyName) {
+        Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
+        return @{ name = $policyName; id = "existing" }
+    }
+    
+    try {
+        $body = @{
+            name = $policyName
+            description = "Microsoft Office update settings"
+            platforms = "windows10"
+            technologies = "mdm"
+            settings = @(
+                @{
+                    id = "0"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                        settingDefinitionId = "device_vendor_msft_policy_config_office16v2~policy~l_microsoftofficemachine~l_updates_l_enableautomaticupdates"
+                        choiceSettingValue = @{
+                            value = "device_vendor_msft_policy_config_office16v2~policy~l_microsoftofficemachine~l_updates_l_enableautomaticupdates_1"
+                            children = @()
+                        }
+                    }
+                }
+            )
+        }
+        
+        $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" -Body $body
+        Write-LogMessage -Message "Created Office Updates policy" -Type Success
+        return $result
+    }
+    catch {
+        Write-LogMessage -Message "Failed to create Office policies - $($_.Exception.Message)" -Type Error
+        return $null
+    }
+}
+
+function New-OutlookPolicy {
+    Write-LogMessage -Message "Creating Outlook configuration policy..." -Type Info
+    
+    $policyName = "Outlook Configuration"
+    if (Test-PolicyExists -PolicyName $policyName) {
+        Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
+        return @{ name = $policyName; id = "existing" }
+    }
+    
+    try {
+        $body = @{
+            name = $policyName
+            description = "Microsoft Outlook user experience settings"
+            platforms = "windows10"
+            technologies = "mdm"
+            settings = @(
+                @{
+                    id = "0"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                        settingDefinitionId = "user_vendor_msft_policy_config_office16v2~policy~l_microsoftofficesystem~l_languagesettings~l_other_l_disablecomingsoon"
+                        choiceSettingValue = @{
+                            value = "user_vendor_msft_policy_config_office16v2~policy~l_microsoftofficesystem~l_languagesettings~l_other_l_disablecomingsoon_1"
+                            children = @()
+                        }
+                    }
+                }
+            )
+        }
+        
+        $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" -Body $body
+        Write-LogMessage -Message "Created Outlook policy" -Type Success
+        return $result
+    }
+    catch {
+        Write-LogMessage -Message "Failed to create Outlook policy - $($_.Exception.Message)" -Type Error
+        return $null
+    }
+}
 
 function New-EdgeUpdatePolicy {
     Write-LogMessage -Message "Creating Edge Update policy..." -Type Info
@@ -1724,31 +2163,84 @@ function New-EdgeUpdatePolicy {
                 templateFamily = "none"
             }
             settings = @(
+                # Target Channel
                 @{
                     id = "0"
                     settingInstance = @{
                         "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_update_allowautoupdate"
+                        settingDefinitionId = "device_vendor_msft_policy_config_updatev95~policy~cat_edgeupdate~cat_applications~cat_microsoftedge_pol_targetchannelmicrosoftedge"
                         choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_update_allowautoupdate_1"
-                            children = @()
+                            value = "device_vendor_msft_policy_config_updatev95~policy~cat_edgeupdate~cat_applications~cat_microsoftedge_pol_targetchannelmicrosoftedge_1"
+                            children = @(
+                                @{
+                                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                                    settingDefinitionId = "device_vendor_msft_policy_config_updatev95~policy~cat_edgeupdate~cat_applications~cat_microsoftedge_pol_targetchannelmicrosoftedge_part_targetchannel"
+                                    choiceSettingValue = @{
+                                        value = "device_vendor_msft_policy_config_updatev95~policy~cat_edgeupdate~cat_applications~cat_microsoftedge_pol_targetchannelmicrosoftedge_part_targetchannel_stable"
+                                        children = @()
+                                    }
+                                }
+                            )
                         }
                     }
                 },
+                # Update Policy Microsoft Edge
                 @{
                     id = "1"
                     settingInstance = @{
                         "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_microsoft_edge~policy~microsoft_edge_updatedefault"
+                        settingDefinitionId = "device_vendor_msft_policy_config_update~policy~cat_google~cat_googleupdate~cat_applications~cat_microsoftedge_pol_updatepolicymicrosoftedge"
                         choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_microsoft_edge~policy~microsoft_edge_updatedefault_1"
+                            value = "device_vendor_msft_policy_config_update~policy~cat_google~cat_googleupdate~cat_applications~cat_microsoftedge_pol_updatepolicymicrosoftedge_1"
                             children = @(
                                 @{
                                     "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                                    settingDefinitionId = "device_vendor_msft_policy_config_microsoft_edge~policy~microsoft_edge_updatedefault_updatedefault"
+                                    settingDefinitionId = "device_vendor_msft_policy_config_update~policy~cat_google~cat_googleupdate~cat_applications~cat_microsoftedge_pol_updatepolicymicrosoftedge_part_updatepolicy"
                                     choiceSettingValue = @{
-                                        value = "device_vendor_msft_policy_config_microsoft_edge~policy~microsoft_edge_updatedefault_updatedefault_1"
+                                        value = "device_vendor_msft_policy_config_update~policy~cat_google~cat_googleupdate~cat_applications~cat_microsoftedge_pol_updatepolicymicrosoftedge_part_updatepolicy_1"
                                         children = @()
+                                    }
+                                }
+                            )
+                        }
+                    }
+                },
+                # Default Update Policy
+                @{
+                    id = "2"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                        settingDefinitionId = "device_vendor_msft_policy_config_update~policy~cat_google~cat_googleupdate~cat_applications_pol_defaultupdatepolicy"
+                        choiceSettingValue = @{
+                            value = "device_vendor_msft_policy_config_update~policy~cat_google~cat_googleupdate~cat_applications_pol_defaultupdatepolicy_1"
+                            children = @(
+                                @{
+                                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                                    settingDefinitionId = "device_vendor_msft_policy_config_update~policy~cat_google~cat_googleupdate~cat_applications_pol_defaultupdatepolicy_part_updatepolicy"
+                                    choiceSettingValue = @{
+                                        value = "device_vendor_msft_policy_config_update~policy~cat_google~cat_googleupdate~cat_applications_pol_defaultupdatepolicy_part_updatepolicy_1"
+                                        children = @()
+                                    }
+                                }
+                            )
+                        }
+                    }
+                },
+                # Auto Update Check Period
+                @{
+                    id = "3"
+                    settingInstance = @{
+                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                        settingDefinitionId = "device_vendor_msft_policy_config_update~policy~cat_google~cat_googleupdate~cat_preferences_pol_autoupdatecheckperiod"
+                        choiceSettingValue = @{
+                            value = "device_vendor_msft_policy_config_update~policy~cat_google~cat_googleupdate~cat_preferences_pol_autoupdatecheckperiod_1"
+                            children = @(
+                                @{
+                                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance"
+                                    settingDefinitionId = "device_vendor_msft_policy_config_update~policy~cat_google~cat_googleupdate~cat_preferences_pol_autoupdatecheckperiod_part_autoupdatecheckperiod"
+                                    simpleSettingValue = @{
+                                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationIntegerSettingValue"
+                                        value = 700
                                     }
                                 }
                             )
@@ -1768,490 +2260,10 @@ function New-EdgeUpdatePolicy {
     }
 }
 
-function New-DefenderPolicy {
-    Write-LogMessage -Message "Creating Defender Security policy..." -Type Info
-    
-    $policyName = "Defender Security"
-    if (Test-PolicyExists -PolicyName $policyName) {
-        Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
-        return @{ name = $policyName; id = "existing" }
-    }
-    
-    try {
-        $body = @{
-            name = $policyName
-            description = "Microsoft Defender security configuration"
-            platforms = "windows10"
-            technologies = "mdm"
-            templateReference = @{
-                templateId = ""
-                templateFamily = "none"
-            }
-            settings = @(
-                @{
-                    id = "0"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_disableantispyware"
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_defender_disableantispyware_0"
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "1"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_disableantimalware"
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_defender_disableantimalware_0"
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "2"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_enablecontrolledfolderaccess"
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_defender_enablecontrolledfolderaccess_1"
-                            children = @()
-                        }
-                    }
-                }
-            )
-        }
-        
-        $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" -Body $body
-        Write-LogMessage -Message "Created Defender Security policy" -Type Success
-        return $result
-    }
-    catch {
-        Write-LogMessage -Message "Failed to create Defender Security policy - $($_.Exception.Message)" -Type Error
-        return $null
-    }
-}
-
-function New-FirewallPolicy {
-    Write-LogMessage -Message "Creating Windows Firewall policy..." -Type Info
-    
-    $policyName = "Windows Firewall"
-    if (Test-PolicyExists -PolicyName $policyName) {
-        Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
-        return @{ name = $policyName; id = "existing" }
-    }
-    
-    try {
-        $body = @{
-            name = $policyName
-            description = "Windows Firewall configuration for all network profiles"
-            platforms = "windows10"
-            technologies = "mdm"
-            templateReference = @{
-                templateId = ""
-                templateFamily = "none"
-            }
-            settings = @(
-                @{
-                    id = "0"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "vendor_msft_firewall_mdmstore_domainprofile_enablefirewall"
-                        choiceSettingValue = @{
-                            value = "vendor_msft_firewall_mdmstore_domainprofile_enablefirewall_true"
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "1"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "vendor_msft_firewall_mdmstore_privateprofile_enablefirewall"
-                        choiceSettingValue = @{
-                            value = "vendor_msft_firewall_mdmstore_privateprofile_enablefirewall_true"
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "2"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "vendor_msft_firewall_mdmstore_publicprofile_enablefirewall"
-                        choiceSettingValue = @{
-                            value = "vendor_msft_firewall_mdmstore_publicprofile_enablefirewall_true"
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "3"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "vendor_msft_firewall_mdmstore_domainprofile_defaultinboundaction"
-                        choiceSettingValue = @{
-                            value = "vendor_msft_firewall_mdmstore_domainprofile_defaultinboundaction_block"
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "4"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "vendor_msft_firewall_mdmstore_privateprofile_defaultinboundaction"
-                        choiceSettingValue = @{
-                            value = "vendor_msft_firewall_mdmstore_privateprofile_defaultinboundaction_block"
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "5"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "vendor_msft_firewall_mdmstore_publicprofile_defaultinboundaction"
-                        choiceSettingValue = @{
-                            value = "vendor_msft_firewall_mdmstore_publicprofile_defaultinboundaction_block"
-                            children = @()
-                        }
-                    }
-                }
-            )
-        }
-        
-        $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" -Body $body
-        Write-LogMessage -Message "Created Windows Firewall policy" -Type Success
-        return $result
-    }
-    catch {
-        Write-LogMessage -Message "Failed to create Windows Firewall policy - $($_.Exception.Message)" -Type Error
-        return $null
-    }
-}
-
-function New-TamperProtectionPolicy {
-    Write-LogMessage -Message "Creating Tamper Protection policy..." -Type Info
-    
-    $policyName = "Tamper Protection"
-    if (Test-PolicyExists -PolicyName $policyName) {
-        Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
-        return @{ name = $policyName; id = "existing" }
-    }
-    
-    try {
-        $body = @{
-            name = $policyName
-            description = "Enable tamper protection to prevent unauthorized changes to security settings"
-            platforms = "windows10"
-            technologies = "mdm"
-            templateReference = @{
-                templateId = ""
-                templateFamily = "none"
-            }
-            settings = @(
-                @{
-                    id = "0"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_disabletamperprotection"
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_defender_disabletamperprotection_0"
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "1"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_defender_enableconfigurationprotection"
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_defender_enableconfigurationprotection_1"
-                            children = @()
-                        }
-                    }
-                }
-            )
-        }
-        
-        $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" -Body $body
-        Write-LogMessage -Message "Created Tamper Protection policy" -Type Success
-        return $result
-    }
-    catch {
-        Write-LogMessage -Message "Failed to create Tamper Protection policy - $($_.Exception.Message)" -Type Error
-        return $null
-    }
-}
-
-function New-AdminAccountPolicy {
-    Write-LogMessage -Message "Creating Admin Account policy..." -Type Info
-    
-    $policyName = "Admin Account Policy"
-    if (Test-PolicyExists -PolicyName $policyName) {
-        Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
-        return @{ name = $policyName; id = "existing" }
-    }
-    
-    try {
-        $body = @{
-            name = $policyName
-            description = "Local administrator account security configuration"
-            platforms = "windows10"
-            technologies = "mdm"
-            templateReference = @{
-                templateId = ""
-                templateFamily = "none"
-            }
-            settings = @(
-                @{
-                    id = "0"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_localusersandgroups_configure"
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_localusersandgroups_configure_1"
-                            children = @(
-                                @{
-                                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance"
-                                    settingDefinitionId = "device_vendor_msft_policy_config_localusersandgroups_configure_groupconfiguration_accessgroup"
-                                    simpleSettingValue = @{
-                                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationStringSettingValue"
-                                        value = '{"LocalUsersAndGroups":{"Groups":[{"Name":"Administrators","Description":"Built-in group for administrators","GroupMembership":{"MembershipType":"Restrict","Members":[{"Name":"localadmin","Type":"LocalUser"}]}}]}}'
-                                    }
-                                }
-                            )
-                        }
-                    }
-                },
-                @{
-                    id = "1"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_accounts_enableadministratoraccountstatus"
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_accounts_enableadministratoraccountstatus_1"
-                            children = @()
-                        }
-                    }
-                }
-            )
-        }
-        
-        $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" -Body $body
-        Write-LogMessage -Message "Created Admin Account policy" -Type Success
-        return $result
-    }
-    catch {
-        Write-LogMessage -Message "Failed to create Admin Account policy - $($_.Exception.Message)" -Type Error
-        return $null
-    }
-}
-
-function New-UnenrollmentPolicy {
-    Write-LogMessage -Message "Creating Unenrollment Prevention policy..." -Type Info
-    
-    $policyName = "Prevent Unenrollment"
-    if (Test-PolicyExists -PolicyName $policyName) {
-        Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
-        return @{ name = $policyName; id = "existing" }
-    }
-    
-    try {
-        $body = @{
-            name = $policyName
-            description = "Prevent users from unenrolling from device management"
-            platforms = "windows10"
-            technologies = "mdm"
-            templateReference = @{
-                templateId = ""
-                templateFamily = "none"
-            }
-            settings = @(
-                @{
-                    id = "0"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_dmclient_provider_ms_dm_server_disablemdmunenrollment"
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_dmclient_provider_ms_dm_server_disablemdmunenrollment_true"
-                            children = @()
-                        }
-                    }
-                }
-            )
-        }
-        
-        $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" -Body $body
-        Write-LogMessage -Message "Created Unenrollment Prevention policy" -Type Success
-        return $result
-    }
-    catch {
-        Write-LogMessage -Message "Failed to create Unenrollment Prevention policy - $($_.Exception.Message)" -Type Error
-        return $null
-    }
-}
-
-function New-OfficePolicies {
-    Write-LogMessage -Message "Creating Office 365 policy..." -Type Info
-    
-    $policyName = "Office 365 Configuration"
-    if (Test-PolicyExists -PolicyName $policyName) {
-        Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
-        return @{ name = $policyName; id = "existing" }
-    }
-    
-    try {
-        $body = @{
-            name = $policyName
-            description = "Microsoft Office 365 security and update configuration"
-            platforms = "windows10"
-            technologies = "mdm"
-            templateReference = @{
-                templateId = ""
-                templateFamily = "none"
-            }
-            settings = @(
-                @{
-                    id = "0"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "user_vendor_msft_policy_config_office16v2~policy~l_microsoftofficesystem~l_securitysettings_l_disablevbaforofficeapps"
-                        choiceSettingValue = @{
-                            value = "user_vendor_msft_policy_config_office16v2~policy~l_microsoftofficesystem~l_securitysettings_l_disablevbaforofficeapps_0"
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "1"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "user_vendor_msft_policy_config_office16v2~policy~l_microsoftofficesystem~l_securitysettings_l_blockmacrosfrominternetinofficeapps"
-                        choiceSettingValue = @{
-                            value = "user_vendor_msft_policy_config_office16v2~policy~l_microsoftofficesystem~l_securitysettings_l_blockmacrosfrominternetinofficeapps_1"
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "2"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "user_vendor_msft_policy_config_office16v2~policy~l_microsoftofficesystem~l_securitysettings~l_trustcenter_l_disableexternalcontent"
-                        choiceSettingValue = @{
-                            value = "user_vendor_msft_policy_config_office16v2~policy~l_microsoftofficesystem~l_securitysettings~l_trustcenter_l_disableexternalcontent_1"
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "3"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_office16v2~policy~l_microsoftofficesystem~l_updates_l_enableautomaticupdates"
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_office16v2~policy~l_microsoftofficesystem~l_updates_l_enableautomaticupdates_1"
-                            children = @()
-                        }
-                    }
-                }
-            )
-        }
-        
-        $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" -Body $body
-        Write-LogMessage -Message "Created Office 365 policy" -Type Success
-        return $result
-    }
-    catch {
-        Write-LogMessage -Message "Failed to create Office 365 policy - $($_.Exception.Message)" -Type Error
-        return $null
-    }
-}
-
-function New-OutlookPolicy {
-    Write-LogMessage -Message "Creating Outlook policy..." -Type Info
-    
-    $policyName = "Outlook Configuration"
-    if (Test-PolicyExists -PolicyName $policyName) {
-        Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
-        return @{ name = $policyName; id = "existing" }
-    }
-    
-    try {
-        $body = @{
-            name = $policyName
-            description = "Microsoft Outlook security and configuration settings"
-            platforms = "windows10"
-            technologies = "mdm"
-            templateReference = @{
-                templateId = ""
-                templateFamily = "none"
-            }
-            settings = @(
-                @{
-                    id = "0"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "user_vendor_msft_policy_config_outlk16v2~policy~l_microsoftofficeoutlook~l_security~l_trustcenter_l_automaticdownloadattachments"
-                        choiceSettingValue = @{
-                            value = "user_vendor_msft_policy_config_outlk16v2~policy~l_microsoftofficeoutlook~l_security~l_trustcenter_l_automaticdownloadattachments_0"
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "1"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "user_vendor_msft_policy_config_outlk16v2~policy~l_microsoftofficeoutlook~l_security_l_outlooksecuritymode"
-                        choiceSettingValue = @{
-                            value = "user_vendor_msft_policy_config_outlk16v2~policy~l_microsoftofficeoutlook~l_security_l_outlooksecuritymode_1"
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "2"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "user_vendor_msft_policy_config_outlk16v2~policy~l_microsoftofficeoutlook~l_security~l_cryptography_l_digestalgorithm"
-                        choiceSettingValue = @{
-                            value = "user_vendor_msft_policy_config_outlk16v2~policy~l_microsoftofficeoutlook~l_security~l_cryptography_l_digestalgorithm_1"
-                            children = @(
-                                @{
-                                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                                    settingDefinitionId = "user_vendor_msft_policy_config_outlk16v2~policy~l_microsoftofficeoutlook~l_security~l_cryptography_l_digestalgorithm_l_digestalgorithmdropid"
-                                    choiceSettingValue = @{
-                                        value = "user_vendor_msft_policy_config_outlk16v2~policy~l_microsoftofficeoutlook~l_security~l_cryptography_l_digestalgorithm_l_digestalgorithmdropid_sha256"
-                                        children = @()
-                                    }
-                                }
-                            )
-                        }
-                    }
-                }
-            )
-        }
-        
-        $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" -Body $body
-        Write-LogMessage -Message "Created Outlook policy" -Type Success
-        return $result
-    }
-    catch {
-        Write-LogMessage -Message "Failed to create Outlook policy - $($_.Exception.Message)" -Type Error
-        return $null
-    }
-}
-
 function New-DisableUACPolicy {
-    Write-LogMessage -Message "Creating UAC Disable policy..." -Type Info
+    Write-LogMessage -Message "Creating Disable UAC for QuickAssist policy..." -Type Info
     
-    $policyName = "Disable UAC Prompts"
+    $policyName = "Disable UAC for Quickassist"
     if (Test-PolicyExists -PolicyName $policyName) {
         Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
         return @{ name = $policyName; id = "existing" }
@@ -2260,7 +2272,7 @@ function New-DisableUACPolicy {
     try {
         $body = @{
             name = $policyName
-            description = "Disable User Account Control prompts for administrators"
+            description = "Disable UAC secure desktop prompt for QuickAssist"
             platforms = "windows10"
             technologies = "mdm"
             templateReference = @{
@@ -2272,20 +2284,9 @@ function New-DisableUACPolicy {
                     id = "0"
                     settingInstance = @{
                         "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_useraccount_control_enableluaforfoldersandappsinprogram"
+                        settingDefinitionId = "device_vendor_msft_policy_config_localpoliciessecurityoptions_useraccountcontrol_switchtothesecuredesktopwhenpromptingforelevation"
                         choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_useraccount_control_enableluaforfoldersandappsinprogram_0"
-                            children = @()
-                        }
-                    }
-                },
-                @{
-                    id = "1"
-                    settingInstance = @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                        settingDefinitionId = "device_vendor_msft_policy_config_localpoliciessecurityoptions_useraccountcontrol_behavioroftheelevationpromptforadministrators"
-                        choiceSettingValue = @{
-                            value = "device_vendor_msft_policy_config_localpoliciessecurityoptions_ueraccontcontrol_behavioroftheelevationpromptforadministrators_0"
+                            value = "device_vendor_msft_policy_config_localpoliciessecurityoptions_useraccountcontrol_switchtothesecuredesktopwhenpromptingforelevation_0"
                             children = @()
                         }
                     }
@@ -2294,301 +2295,189 @@ function New-DisableUACPolicy {
         }
         
         $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" -Body $body
-        Write-LogMessage -Message "Created UAC Disable policy" -Type Success
+        Write-LogMessage -Message "Created Disable UAC for QuickAssist policy" -Type Success
         return $result
     }
     catch {
-        Write-LogMessage -Message "Failed to create UAC Disable policy - $($_.Exception.Message)" -Type Error
+        Write-LogMessage -Message "Failed to create Disable UAC policy - $($_.Exception.Message)" -Type Error
         return $null
     }
 }
 
 # === Helper Functions ===
 
-function Show-EDREnablementNote {
-    Write-LogMessage -Message "=== EDR Enablement Note ===" -Type Info
-    Write-LogMessage -Message "EDR (Endpoint Detection and Response) must be enabled manually through the Microsoft 365 Defender portal:" -Type Info
-    Write-LogMessage -Message "1. Go to https://security.microsoft.com" -Type Info
-    Write-LogMessage -Message "2. Navigate to Settings > Endpoints > Advanced features" -Type Info
-    Write-LogMessage -Message "3. Enable 'Microsoft Defender for Endpoint'" -Type Info
-    Write-LogMessage -Message "4. Configure onboarding for Windows 10/11 devices" -Type Info
-    Write-LogMessage -Message "EDR cannot be configured via Intune policies alone and requires licensing." -Type Info
-}
-
-function Enable-WindowsLAPS {
-    Write-LogMessage -Message "Attempting to enable Windows LAPS prerequisite..." -Type Info
-    
-    try {
-        # Check if LAPS is available in the tenant
-        $lapsAvailable = $false
-        try {
-            $lapsSettings = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/beta/deviceManagement/deviceManagementPartners" -ErrorAction SilentlyContinue
-            $lapsAvailable = $true
-        }
-        catch {
-            Write-LogMessage -Message "LAPS capability check failed - continuing anyway" -Type Warning -LogOnly
-        }
-        
-        if ($lapsAvailable) {
-            Write-LogMessage -Message "LAPS capability confirmed in tenant" -Type Success
-            return $true
-        }
-        else {
-            Write-LogMessage -Message "LAPS may not be fully available - policies will be created but may need manual enablement" -Type Warning
-            return $true  # Continue anyway
-        }
-    }
-    catch {
-        Write-LogMessage -Message "LAPS prerequisite check failed - $($_.Exception.Message)" -Type Warning
-        Write-LogMessage -Message "LAPS policies will be created but may require manual enablement in the tenant" -Type Warning
-        return $true  # Don't fail the entire process
-    }
-}
-
 function Test-PolicyExists {
-    param([string]$PolicyName)
+    param (
+        [string]$PolicyName
+    )
     
     try {
-        $existingPolicies = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies?`$filter=name eq '$PolicyName'"
-        return ($existingPolicies.value.Count -gt 0)
+        $existingPolicies = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" -ErrorAction Stop
+        
+        foreach ($policy in $existingPolicies.value) {
+            if ($policy.name -eq $PolicyName) {
+                return $true
+            }
+        }
+        return $false
     }
     catch {
-        Write-LogMessage -Message "Error checking if policy '$PolicyName' exists - $($_.Exception.Message)" -Type Warning -LogOnly
+        Write-LogMessage -Message "Error checking existing policies: $($_.Exception.Message)" -Type Warning -LogOnly
         return $false
     }
 }
 
-function Test-GroupExists {
-    param([string]$GroupName)
-    
-    try {
-        $group = Get-MgGroup -Filter "displayName eq '$GroupName'" -ErrorAction SilentlyContinue
-        return ($null -ne $group)
-    }
-    catch {
-        Write-LogMessage -Message "Error checking if group '$GroupName' exists - $($_.Exception.Message)" -Type Warning -LogOnly
-        return $false
-    }
+function Show-EDREnablementNote {
+    Write-LogMessage -Message "EDR Policy requires manual enablement:" -Type Warning
+    Write-LogMessage -Message "1. Go to https://security.microsoft.com" -Type Info
+    Write-LogMessage -Message "2. Navigate to Settings > Endpoints > Device management > Onboarding" -Type Info
+    Write-LogMessage -Message "3. Enable Microsoft Defender for Business" -Type Info
+    Write-LogMessage -Message "4. Configure the security connector" -Type Info
 }
 
 function Get-SharePointRootSiteUrl {
     try {
-        # Get tenant domain name
-        $context = Get-MgContext
-        if ($context -and $context.TenantId) {
-            # Extract tenant name from various sources
-            $tenantName = ""
-            
-            # Try to get from organization info
-            try {
-                $org = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/organization" -ErrorAction SilentlyContinue
-                if ($org.value -and $org.value[0].verifiedDomains) {
-                    $primaryDomain = $org.value[0].verifiedDomains | Where-Object { $_.isInitial -eq $true } | Select-Object -First 1
-                    if ($primaryDomain -and $primaryDomain.name) {
-                        $tenantName = $primaryDomain.name.Split('.')[0]
-                    }
-                }
-            }
-            catch {
-                Write-LogMessage -Message "Could not retrieve organization details for SharePoint URL" -Type Warning -LogOnly
-            }
-            
-            # Fallback to a generic SharePoint URL
-            if ([string]::IsNullOrEmpty($tenantName)) {
-                $tenantName = "your-tenant"
-                Write-LogMessage -Message "Using generic SharePoint URL - please update manually if needed" -Type Warning
-            }
-            
-            $sharePointUrl = "https://$tenantName.sharepoint.com"
-            Write-LogMessage -Message "Generated SharePoint URL: $sharePointUrl" -Type Info -LogOnly
-            return $sharePointUrl
+        if ($script:TenantState -and $script:TenantState.DefaultDomain) {
+            $domain = $script:TenantState.DefaultDomain
+            $tenantName = $domain.Split('.')[0]
+            return "https://$tenantName.sharepoint.com"
         }
-        else {
-            Write-LogMessage -Message "No Graph context available - using placeholder SharePoint URL" -Type Warning
-            return "https://your-tenant.sharepoint.com"
-        }
+        return "https://www.office.com"
     }
     catch {
-        Write-LogMessage -Message "Error generating SharePoint URL - $($_.Exception.Message)" -Type Warning -LogOnly
-        return "https://your-tenant.sharepoint.com"
+        return "https://www.office.com"
     }
 }
 
-function Assign-PoliciesWithWait {
-    param(
-        [array]$NewPolicies,
-        [array]$ExistingPolicyNames,
-        [array]$GroupNames,
-        [bool]$UpdateExistingPolicies
+function Update-ExistingPolicyAssignments {
+    param (
+        [array]$PolicyNames,
+        [array]$GroupNames
     )
     
-    $results = @{
-        Success = 0
-        Failed = 0
-        Total = 0
-    }
-    
-    # Get group IDs for all target groups
-    $groupIds = @{}
-    foreach ($groupName in $GroupNames) {
-        try {
-            $group = Get-MgGroup -Filter "displayName eq '$groupName'" -ErrorAction Stop
-            if ($group) {
-                $groupIds[$groupName] = $group.Id
-                Write-LogMessage -Message "Found group '$groupName' with ID: $($group.Id)" -Type Success -LogOnly
-            }
-        }
-        catch {
-            Write-LogMessage -Message "Failed to get ID for group '$groupName' - $($_.Exception.Message)" -Type Error
-            return $results
-        }
-    }
-    
-    # Assign newly created policies
-    foreach ($policy in $NewPolicies) {
-        if ($policy -and $policy.id) {
-            $results.Total++
+    try {
+        # Get all existing policies first
+        $existingPolicies = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" -ErrorAction Stop
+        
+        foreach ($policyName in $PolicyNames) {
+            # Find the policy by name
+            $policy = $existingPolicies.value | Where-Object { $_.name -eq $policyName }
             
+            if (-not $policy) {
+                Write-LogMessage -Message "Policy '$policyName' not found, skipping assignment update" -Type Warning
+                continue
+            }
+            
+            Write-LogMessage -Message "Updating assignments for existing policy: $policyName" -Type Info
+            
+            # Get current assignments for this policy
+            $currentAssignments = @()
             try {
-                Write-LogMessage -Message "Assigning policy '$($policy.name)' to groups: $($GroupNames -join ', ')" -Type Info
-                
-                $assignments = @()
-                foreach ($groupName in $GroupNames) {
-                    $assignments += @{
-                        id = [Guid]::NewGuid().ToString()
-                        target = @{
-                            "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
-                            groupId = $groupIds[$groupName]
-                        }
-                    }
-                }
-                
-                $assignmentBody = @{
-                    assignments = $assignments
-                }
-                
-                $null = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies('$($policy.id)')/assign" -Body $assignmentBody
-                Write-LogMessage -Message "Successfully assigned policy '$($policy.name)'" -Type Success
-                $results.Success++
-                
-                # Wait between assignments to avoid throttling
-                Start-Sleep -Seconds 2
+                $assignmentResponse = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$($policy.id)/assignments" -ErrorAction Stop
+                $currentAssignments = $assignmentResponse.value
             }
             catch {
-                Write-LogMessage -Message "Failed to assign policy '$($policy.name)' - $($_.Exception.Message)" -Type Error
-                $results.Failed++
+                Write-LogMessage -Message "Could not retrieve current assignments for $policyName, proceeding with new assignments only" -Type Warning
             }
-        }
-    }
-    
-    # Handle existing policies if requested
-    if ($UpdateExistingPolicies -and $ExistingPolicyNames.Count -gt 0) {
-        Write-LogMessage -Message "Processing existing policies for group assignment updates..." -Type Info
-        
-        foreach ($policyName in $ExistingPolicyNames) {
-            $results.Total++
             
-            try {
-                # Find the existing policy
-                $existingPolicy = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies?`$filter=name eq '$policyName'"
-                
-                if ($existingPolicy.value -and $existingPolicy.value.Count -gt 0) {
-                    $policyId = $existingPolicy.value[0].id
+            # Build list of new assignments to add
+            $newAssignments = @()
+            $existingGroupIds = @()
+            
+            # Extract existing group IDs to avoid duplicates
+            foreach ($assignment in $currentAssignments) {
+                if ($assignment.target.'@odata.type' -eq "#microsoft.graph.groupAssignmentTarget") {
+                    $existingGroupIds += $assignment.target.groupId
+                }
+            }
+            
+            # Add new groups that aren't already assigned
+            foreach ($groupName in $GroupNames) {
+                if ($script:TenantState.CreatedGroups.ContainsKey($groupName)) {
+                    $groupId = $script:TenantState.CreatedGroups[$groupName]
                     
-                    # Get current assignments
-                    $currentAssignments = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies('$policyId')/assignments"
-                    
-                    # Check if groups are already assigned
-                    $currentGroupIds = $currentAssignments.value | Where-Object { $_.target.'@odata.type' -eq '#microsoft.graph.groupAssignmentTarget' } | ForEach-Object { $_.target.groupId }
-                    
-                    $newAssignmentsNeeded = @()
-                    foreach ($groupName in $GroupNames) {
-                        if ($groupIds[$groupName] -notin $currentGroupIds) {
-                            $newAssignmentsNeeded += @{
-                                id = [Guid]::NewGuid().ToString()
-                                target = @{
-                                    "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
-                                    groupId = $groupIds[$groupName]
-                                }
+                    if ($existingGroupIds -notcontains $groupId) {
+                        $newAssignments += @{
+                            target = @{
+                                "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
+                                groupId = $groupId
                             }
                         }
-                    }
-                    
-                    if ($newAssignmentsNeeded.Count -gt 0) {
-                        # Combine existing and new assignments
-                        $allAssignments = @($currentAssignments.value) + $newAssignmentsNeeded
-                        
-                        $assignmentBody = @{
-                            assignments = $allAssignments
-                        }
-                        
-                        $null = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies('$policyId')/assign" -Body $assignmentBody
-                        Write-LogMessage -Message "Updated assignments for existing policy '$policyName'" -Type Success
-                        $results.Success++
+                        Write-LogMessage -Message "Adding group '$groupName' to policy '$policyName'" -Type Info -LogOnly
                     }
                     else {
-                        Write-LogMessage -Message "Existing policy '$policyName' already has all required group assignments" -Type Info
-                        $results.Success++
+                        Write-LogMessage -Message "Group '$groupName' already assigned to policy '$policyName'" -Type Info -LogOnly
                     }
                 }
                 else {
-                    Write-LogMessage -Message "Could not find existing policy '$policyName'" -Type Warning
-                    $results.Failed++
+                    Write-LogMessage -Message "Group '$groupName' not found in created groups, skipping" -Type Warning -LogOnly
+                }
+            }
+            
+            # If we have new assignments to add, update the policy
+            if ($newAssignments.Count -gt 0) {
+                # Combine existing and new assignments
+                $allAssignments = @()
+                $allAssignments += $currentAssignments
+                $allAssignments += $newAssignments
+                
+                $body = @{
+                    assignments = $allAssignments
                 }
                 
-                # Wait between assignments
-                Start-Sleep -Seconds 2
+                # Update the policy assignments
+                Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$($policy.id)/assignments" -Body $body
+                Write-LogMessage -Message "Successfully updated assignments for policy '$policyName' (added $($newAssignments.Count) new groups)" -Type Success
             }
-            catch {
-                Write-LogMessage -Message "Failed to update assignments for existing policy '$policyName' - $($_.Exception.Message)" -Type Error
-                $results.Failed++
+            else {
+                Write-LogMessage -Message "No new groups to add to policy '$policyName'" -Type Info
             }
         }
     }
+    catch {
+        Write-LogMessage -Message "Error updating existing policy assignments: $($_.Exception.Message)" -Type Error
+    }
+}
+
+function Assign-PolicyToGroups {
+    param (
+        [string]$PolicyId,
+        [array]$GroupNames
+    )
     
-    return $results
-}
-
-# === Core utility functions (if not already defined) ===
-
-if (-not (Get-Command Write-LogMessage -ErrorAction SilentlyContinue)) {
-    function Write-LogMessage {
-        param(
-            [string]$Message,
-            [ValidateSet("Info", "Success", "Warning", "Error")]$Type = "Info",
-            [switch]$LogOnly
-        )
+    try {
+        $assignments = @()
+        $assignedGroups = @()
         
-        $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-        $colorMap = @{
-            "Info" = "White"
-            "Success" = "Green" 
-            "Warning" = "Yellow"
-            "Error" = "Red"
+        foreach ($groupName in $GroupNames) {
+            if ($script:TenantState.CreatedGroups.ContainsKey($groupName)) {
+                $groupId = $script:TenantState.CreatedGroups[$groupName]
+                $assignments += @{
+                    target = @{
+                        "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
+                        groupId = $groupId
+                    }
+                }
+                $assignedGroups += $groupName
+            }
+            else {
+                Write-LogMessage -Message "Group '$groupName' not found in created groups, skipping assignment" -Type Warning -LogOnly
+            }
         }
         
-        if (-not $LogOnly) {
-            Write-Host "[$timestamp] $Message" -ForegroundColor $colorMap[$Type]
+        if ($assignments.Count -gt 0) {
+            $body = @{
+                assignments = $assignments
+            }
+            
+            Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$PolicyId/assignments" -Body $body
+            Write-LogMessage -Message "Assigned policy $PolicyId to groups: $($assignedGroups -join ', ')" -Type Success
         }
-        
-        # Log to file if needed (implement as required)
+        else {
+            Write-LogMessage -Message "No valid groups found for policy assignment" -Type Warning
+        }
     }
-}
-
-if (-not (Get-Command Test-NotEmpty -ErrorAction SilentlyContinue)) {
-    function Test-NotEmpty {
-        param([object]$Value)
-        return ($null -ne $Value -and $Value -ne "" -and $Value -ne @())
-    }
-}
-
-if (-not (Get-Command Show-Progress -ErrorAction SilentlyContinue)) {
-    function Show-Progress {
-        param(
-            [string]$Activity,
-            [string]$Status,
-            [int]$PercentComplete = 0
-        )
-        Write-Progress -Activity $Activity -Status $Status -PercentComplete $PercentComplete
+    catch {
+        Write-LogMessage -Message "Failed to assign policy $PolicyId - $($_.Exception.Message)" -Type Warning
     }
 }
