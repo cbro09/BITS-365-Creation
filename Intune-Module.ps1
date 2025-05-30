@@ -100,6 +100,11 @@ function New-TenantIntune {
             Write-LogMessage -Message "Failed to create WindowsAutoPilot group" -Type Warning
         }
         
+        # Create update rings and device groups
+        $updateRings = New-WindowsUpdateRings
+        if (-not $updateRings) {
+            Write-LogMessage -Message "Failed to create Windows Update rings" -Type Warning
+        }
         
         # Enable LAPS prerequisite
         $lapsEnabled = Enable-WindowsLAPS
@@ -144,20 +149,19 @@ function New-TenantIntune {
         $newPolicies = $policies | Where-Object { $_ -and $_.id -and $_.id -ne "existing" }
         $existingPolicyNames = ($policies | Where-Object { $_ -and $_.id -eq "existing" }).name
         
-        # Assign policies to AutoPilot group only (for device preparation phase)
+        # Assign policies to device groups (including AutoPilot group for device preparation phase)
         # AutoPilot devices benefit from having policies applied during the "Device preparation" phase
-        Write-LogMessage -Message "Assigning policies to WindowsAutoPilot group only..." -Type Info
-        $deviceGroups = @("WindowsAutoPilot")
+        Write-LogMessage -Message "Assigning policies to device groups including WindowsAutoPilot group..." -Type Info
+        $deviceGroups = @("WindowsDeviceRing0", "WindowsDeviceRing1", "WindowsDeviceRing2", "WindowsAutoPilot")
         
         # Assign new policies
         foreach ($policy in $newPolicies) {
             Assign-PolicyToGroups -PolicyId $policy.id -GroupNames $deviceGroups
         }
         
-        # Update existing policies with AutoPilot group assignment (if requested)
+        # Update existing policies with new group assignments (if requested)
         if ($existingPolicyNames.Count -gt 0 -and $UpdateExistingPolicies) {
             Write-LogMessage -Message "Updating assignments for $($existingPolicyNames.Count) existing policies..." -Type Info
-            Write-LogMessage -Message "Existing policies: $($existingPolicyNames -join ', ')" -Type Info
             Update-ExistingPolicyAssignments -PolicyNames $existingPolicyNames -GroupNames $deviceGroups
         }
         elseif ($existingPolicyNames.Count -gt 0 -and -not $UpdateExistingPolicies) {
@@ -211,6 +215,132 @@ function New-WindowsAutoPilotGroup {
     catch {
         Write-LogMessage -Message "Failed to create WindowsAutoPilot group - $($_.Exception.Message)" -Type Error
         return $null
+    }
+}
+
+function New-WindowsUpdateRings {
+    Write-LogMessage -Message "Creating Windows Update rings and device groups..." -Type Info
+    
+    try {
+        # Create device groups first
+        $deviceGroups = @(
+            @{ Name = "WindowsDeviceRing0"; Description = "Windows devices - Pilot ring (0/0 day deferrals)" },
+            @{ Name = "WindowsDeviceRing1"; Description = "Windows devices - UAT ring (2/7 day deferrals)" },
+            @{ Name = "WindowsDeviceRing2"; Description = "Windows devices - Production ring (7/7 day deferrals)" }
+        )
+        
+        foreach ($group in $deviceGroups) {
+            $existingGroup = Get-MgGroup -Filter "displayName eq '$($group.Name)'" -ErrorAction SilentlyContinue
+            
+            if (-not $existingGroup) {
+                $groupBody = @{
+                    displayName = $group.Name
+                    description = $group.Description
+                    mailEnabled = $false
+                    mailNickname = $group.Name
+                    securityEnabled = $true
+                }
+                
+                $newGroup = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/v1.0/groups" -Body $groupBody
+                Write-LogMessage -Message "Created device group: $($group.Name)" -Type Success
+                $script:TenantState.CreatedGroups[$group.Name] = $newGroup.id
+            }
+            else {
+                Write-LogMessage -Message "Device group already exists: $($group.Name)" -Type Warning
+                $script:TenantState.CreatedGroups[$group.Name] = $existingGroup.Id
+            }
+        }
+        
+        # Create update rings with comprehensive settings
+        $updateRings = @(
+            @{ 
+                Name = "RING0 - Pilot"
+                Description = "Pilot testers for latest feature/quality updates"
+                QualityDeferral = 0
+                FeatureDeferral = 0
+                GroupName = "WindowsDeviceRing0"
+            },
+            @{ 
+                Name = "RING1 - UAT"
+                Description = "UAT testers for latest feature/quality updates"
+                QualityDeferral = 2
+                FeatureDeferral = 7
+                GroupName = "WindowsDeviceRing1"
+            },
+            @{ 
+                Name = "RING2 - Production"
+                Description = "Production devices with standard deferrals"
+                QualityDeferral = 7
+                FeatureDeferral = 7
+                GroupName = "WindowsDeviceRing2"
+            }
+        )
+        
+        foreach ($ring in $updateRings) {
+            # Check if update ring already exists
+            try {
+                $existingRings = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/beta/deviceManagement/windowsUpdateForBusinessRings" -ErrorAction Stop
+                $existingRing = $existingRings.value | Where-Object { $_.displayName -eq $ring.Name }
+                
+                if ($existingRing) {
+                    Write-LogMessage -Message "Update ring already exists: $($ring.Name)" -Type Warning
+                    continue
+                }
+            }
+            catch {
+                Write-LogMessage -Message "Error checking existing update rings, proceeding with creation..." -Type Warning
+            }
+            
+            $ringBody = @{
+                displayName = $ring.Name
+                description = $ring.Description
+                qualityUpdatesDeferralPeriodInDays = $ring.QualityDeferral
+                featureUpdatesDeferralPeriodInDays = $ring.FeatureDeferral
+                automaticUpdateMode = "autoInstallAtMaintenanceTime"
+                businessReadyUpdatesOnly = "businessReadyOnly"
+                skipChecksBeforeRestart = $false
+                pauseFeatureUpdates = $false
+                pauseQualityUpdates = $false
+                installationSchedule = @{
+                    activeHoursStart = "08:00:00.0000000"
+                    activeHoursEnd = "17:00:00.0000000"
+                    scheduledInstallDay = "everyday"
+                    scheduledInstallTime = "03:00:00.0000000"
+                }
+            }
+            
+            try {
+                $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/windowsUpdateForBusinessRings" -Body $ringBody
+                Write-LogMessage -Message "Created update ring: $($ring.Name)" -Type Success
+                
+                # Assign to corresponding device group
+                if ($script:TenantState.CreatedGroups.ContainsKey($ring.GroupName)) {
+                    $groupId = $script:TenantState.CreatedGroups[$ring.GroupName]
+                    $assignmentBody = @{
+                        assignments = @(
+                            @{
+                                target = @{
+                                    "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
+                                    groupId = $groupId
+                                }
+                            }
+                        )
+                    }
+                    
+                    Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/windowsUpdateForBusinessRings/$($result.id)/assignments" -Body $assignmentBody
+                    Write-LogMessage -Message "Assigned update ring $($ring.Name) to group $($ring.GroupName)" -Type Success
+                }
+            }
+            catch {
+                Write-LogMessage -Message "Failed to create update ring $($ring.Name) - $($_.Exception.Message)" -Type Error
+            }
+        }
+        
+        return $true
+    }
+    catch {
+        Write-LogMessage -Message "Failed to create Windows Update rings - $($_.Exception.Message)" -Type Error
+        return $false
     }
 }
 
@@ -2308,127 +2438,22 @@ function New-DisableUACPolicy {
 
 function Test-PolicyExists {
     param (
-        [array]$PolicyNames,
-        [array]$GroupNames
+        [string]$PolicyName
     )
     
     try {
-        # Get all existing policies first
         $existingPolicies = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" -ErrorAction Stop
         
-        foreach ($policyName in $PolicyNames) {
-            # Find the policy by name
-            $policy = $existingPolicies.value | Where-Object { $_.name -eq $policyName }
-            
-            if (-not $policy) {
-                Write-LogMessage -Message "Policy '$policyName' not found, skipping assignment update" -Type Warning
-                continue
-            }
-            
-            Write-LogMessage -Message "Updating assignments for existing policy: $policyName" -Type Info
-            
-            # Get current assignments for this policy
-            $currentAssignments = @()
-            try {
-                $assignmentResponse = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$($policy.id)/assignments" -ErrorAction Stop
-                $currentAssignments = $assignmentResponse.value
-            }
-            catch {
-                Write-LogMessage -Message "Could not retrieve current assignments for $policyName, proceeding with new assignments only" -Type Warning
-            }
-            
-            # Build list of assignments
-            $assignments = @()
-            $existingGroupIds = @()
-            $groupsToAdd = @()
-            
-            # First, preserve existing assignments
-            foreach ($assignment in $currentAssignments) {
-                $assignments += $assignment
-                if ($assignment.target.'@odata.type' -eq "#microsoft.graph.groupAssignmentTarget") {
-                    $existingGroupIds += $assignment.target.groupId
-                }
-            }
-            
-            # Add new groups that aren't already assigned
-            foreach ($groupName in $GroupNames) {
-                if ($script:TenantState.CreatedGroups.ContainsKey($groupName)) {
-                    $groupId = $script:TenantState.CreatedGroups[$groupName]
-                    
-                    if ($existingGroupIds -notcontains $groupId) {
-                        $assignments += @{
-                            id = [System.Guid]::NewGuid().ToString()  # Generate a new ID for the assignment
-                            target = @{
-                                "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
-                                groupId = $groupId
-                            }
-                        }
-                        $groupsToAdd += $groupName
-                        Write-LogMessage -Message "Adding group '$groupName' to policy '$policyName'" -Type Info -LogOnly
-                    }
-                    else {
-                        Write-LogMessage -Message "Group '$groupName' already assigned to policy '$policyName'" -Type Info -LogOnly
-                    }
-                }
-                else {
-                    Write-LogMessage -Message "Group '$groupName' not found in created groups, skipping" -Type Warning -LogOnly
-                }
-            }
-            
-            # If we have new assignments to add, update the policy
-            if ($groupsToAdd.Count -gt 0) {
-                try {
-                    # For configuration policies, we need to use the assign action
-                    $assignBody = @{
-                        assignments = $assignments
-                    }
-                    
-                    # Use the assign action endpoint
-                    $assignUri = "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$($policy.id)/assign"
-                    
-                    Invoke-MgGraphRequest -Method POST -Uri $assignUri -Body $assignBody -ErrorAction Stop
-                    Write-LogMessage -Message "Successfully updated assignments for policy '$policyName' (added groups: $($groupsToAdd -join ', '))" -Type Success
-                }
-                catch {
-                    # If assign action fails, try direct PUT to assignments
-                    try {
-                        $putBody = @{
-                            value = $assignments
-                        }
-                        
-                        Invoke-MgGraphRequest -Method PUT -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$($policy.id)/assignments" -Body $putBody -ErrorAction Stop
-                        Write-LogMessage -Message "Successfully updated assignments for policy '$policyName' using PUT method (added groups: $($groupsToAdd -join ', '))" -Type Success
-                    }
-                    catch {
-                        Write-LogMessage -Message "Failed to update assignments for policy '$policyName': $($_.Exception.Message)" -Type Error
-                        
-                        # As a last resort, try to assign just the new group individually
-                        foreach ($i in 0..($groupsToAdd.Count - 1)) {
-                            try {
-                                $singleAssignment = @{
-                                    target = @{
-                                        "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
-                                        groupId = $script:TenantState.CreatedGroups[$groupsToAdd[$i]]
-                                    }
-                                }
-                                
-                                Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$($policy.id)/assignments" -Body $singleAssignment -ErrorAction Stop
-                                Write-LogMessage -Message "Successfully added group '$($groupsToAdd[$i])' to policy '$policyName' individually" -Type Success
-                            }
-                            catch {
-                                Write-LogMessage -Message "Failed to add group '$($groupsToAdd[$i])' to policy '$policyName': $($_.Exception.Message)" -Type Warning
-                            }
-                        }
-                    }
-                }
-            }
-            else {
-                Write-LogMessage -Message "No new groups to add to policy '$policyName'" -Type Info
+        foreach ($policy in $existingPolicies.value) {
+            if ($policy.name -eq $PolicyName) {
+                return $true
             }
         }
+        return $false
     }
     catch {
-        Write-LogMessage -Message "Error updating existing policy assignments: $($_.Exception.Message)" -Type Error
+        Write-LogMessage -Message "Error checking existing policies: $($_.Exception.Message)" -Type Warning -LogOnly
+        return $false
     }
 }
 
