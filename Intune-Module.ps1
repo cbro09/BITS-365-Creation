@@ -144,20 +144,19 @@ function New-TenantIntune {
         $newPolicies = $policies | Where-Object { $_ -and $_.id -and $_.id -ne "existing" }
         $existingPolicyNames = ($policies | Where-Object { $_ -and $_.id -eq "existing" }).name
         
-        # Assign policies to AutoPilot group only (for device preparation phase)
+        # Assign policies to device groups (including AutoPilot group for device preparation phase)
         # AutoPilot devices benefit from having policies applied during the "Device preparation" phase
-        Write-LogMessage -Message "Assigning policies to WindowsAutoPilot group only..." -Type Info
-        $deviceGroups = @("WindowsAutoPilot")
+        Write-LogMessage -Message "Assigning policies to device groups including WindowsAutoPilot group..." -Type Info
+        $deviceGroups = @("WindowsDeviceRing0", "WindowsDeviceRing1", "WindowsDeviceRing2", "WindowsAutoPilot")
         
         # Assign new policies
         foreach ($policy in $newPolicies) {
             Assign-PolicyToGroups -PolicyId $policy.id -GroupNames $deviceGroups
         }
         
-        # Update existing policies with AutoPilot group assignment (if requested)
+        # Update existing policies with new group assignments (if requested)
         if ($existingPolicyNames.Count -gt 0 -and $UpdateExistingPolicies) {
             Write-LogMessage -Message "Updating assignments for $($existingPolicyNames.Count) existing policies..." -Type Info
-            Write-LogMessage -Message "Existing policies: $($existingPolicyNames -join ', ')" -Type Info
             Update-ExistingPolicyAssignments -PolicyNames $existingPolicyNames -GroupNames $deviceGroups
         }
         elseif ($existingPolicyNames.Count -gt 0 -and -not $UpdateExistingPolicies) {
