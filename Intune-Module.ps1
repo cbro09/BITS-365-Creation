@@ -149,25 +149,87 @@ function New-TenantIntune {
         $newPolicies = $policies | Where-Object { $_ -and $_.id -and $_.id -ne "existing" }
         $existingPolicyNames = ($policies | Where-Object { $_ -and $_.id -eq "existing" }).name
         
-        # Assign policies to device groups (including AutoPilot group for device preparation phase)
-        # AutoPilot devices benefit from having policies applied during the "Device preparation" phase
-        Write-LogMessage -Message "Assigning policies to device groups including WindowsAutoPilot group..." -Type Info
-        $deviceGroups = @("WindowsDeviceRing0", "WindowsDeviceRing1", "WindowsDeviceRing2", "WindowsAutoPilot")
-        
-        # Assign new policies
-        foreach ($policy in $newPolicies) {
-            Assign-PolicyToGroups -PolicyId $policy.id -GroupNames $deviceGroups
+        # Get WindowsAutoPilot group ID once
+if (-not $script:TenantState.CreatedGroups.ContainsKey("WindowsAutoPilot")) {
+    Write-LogMessage -Message "WindowsAutoPilot group not found, cannot assign policies" -Type Error
+    return $false
+}
+
+$autoPilotGroupId = $script:TenantState.CreatedGroups["WindowsAutoPilot"]
+Write-LogMessage -Message "Assigning policies to WindowsAutoPilot group..." -Type Info
+
+# Assign new policies to WindowsAutoPilot group
+foreach ($policy in $newPolicies) {
+    try {
+        $body = @{
+            assignments = @(
+                @{
+                    target = @{
+                        "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
+                        groupId = $autoPilotGroupId
+                    }
+                }
+            )
         }
         
-        # Update existing policies with new group assignments (if requested)
-        if ($existingPolicyNames.Count -gt 0 -and $UpdateExistingPolicies) {
-            Write-LogMessage -Message "Updating assignments for $($existingPolicyNames.Count) existing policies..." -Type Info
-            Update-ExistingPolicyAssignments -PolicyNames $existingPolicyNames -GroupNames $deviceGroups
+        Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$($policy.id)/assignments" -Body $body
+        Write-LogMessage -Message "Assigned '$($policy.name)' to WindowsAutoPilot group" -Type Success
+    }
+    catch {
+        # Try the assign action endpoint as fallback
+        try {
+            $assignUri = "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$($policy.id)/assign"
+            Invoke-MgGraphRequest -Method POST -Uri $assignUri -Body $body
+            Write-LogMessage -Message "Assigned '$($policy.name)' to WindowsAutoPilot group (using assign action)" -Type Success
         }
-        elseif ($existingPolicyNames.Count -gt 0 -and -not $UpdateExistingPolicies) {
-            Write-LogMessage -Message "Found $($existingPolicyNames.Count) existing policies, but update mode is disabled" -Type Warning
-            Write-LogMessage -Message "Existing policies: $($existingPolicyNames -join ', ')" -Type Info
+        catch {
+            Write-LogMessage -Message "Failed to assign '$($policy.name)': $($_.Exception.Message)" -Type Warning
         }
+    }
+}
+
+# Handle existing policies if update mode is enabled
+if ($existingPolicyNames.Count -gt 0 -and $UpdateExistingPolicies) {
+    Write-LogMessage -Message "Updating assignments for $($existingPolicyNames.Count) existing policies..." -Type Info
+    Write-LogMessage -Message "Existing policies: $($existingPolicyNames -join ', ')" -Type Info
+    
+    # Get all existing policies
+    $allPoliciesResponse = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies"
+    $existingPolicies = $allPoliciesResponse.value | Where-Object { $_.name -in $existingPolicyNames }
+    
+    foreach ($policy in $existingPolicies) {
+        try {
+            $body = @{
+                assignments = @(
+                    @{
+                        target = @{
+                            "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
+                            groupId = $autoPilotGroupId
+                        }
+                    }
+                )
+            }
+            
+            Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$($policy.id)/assignments" -Body $body
+            Write-LogMessage -Message "Assigned existing policy '$($policy.name)' to WindowsAutoPilot group" -Type Success
+        }
+        catch {
+            # Try the assign action endpoint as fallback
+            try {
+                $assignUri = "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$($policy.id)/assign"
+                Invoke-MgGraphRequest -Method POST -Uri $assignUri -Body $body
+                Write-LogMessage -Message "Assigned existing policy '$($policy.name)' to WindowsAutoPilot group (using assign action)" -Type Success
+            }
+            catch {
+                Write-LogMessage -Message "Failed to assign existing policy '$($policy.name)': $($_.Exception.Message)" -Type Warning
+            }
+        }
+    }
+}
+elseif ($existingPolicyNames.Count -gt 0 -and -not $UpdateExistingPolicies) {
+    Write-LogMessage -Message "Found $($existingPolicyNames.Count) existing policies, but update mode is disabled" -Type Warning
+    Write-LogMessage -Message "Existing policies: $($existingPolicyNames -join ', ')" -Type Info
+}
         
         Write-LogMessage -Message "Intune configuration completed successfully" -Type Success
         return $true
@@ -2476,138 +2538,5 @@ function Get-SharePointRootSiteUrl {
     }
     catch {
         return "https://www.office.com"
-    }
-}
-
-function Update-ExistingPolicyAssignments {
-    param (
-        [array]$PolicyNames,
-        [array]$GroupNames
-    )
-    
-    try {
-        # Get all existing policies first
-        $existingPolicies = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" -ErrorAction Stop
-        
-        foreach ($policyName in $PolicyNames) {
-            # Find the policy by name
-            $policy = $existingPolicies.value | Where-Object { $_.name -eq $policyName }
-            
-            if (-not $policy) {
-                Write-LogMessage -Message "Policy '$policyName' not found, skipping assignment update" -Type Warning
-                continue
-            }
-            
-            Write-LogMessage -Message "Updating assignments for existing policy: $policyName" -Type Info
-            
-            # Get current assignments for this policy
-            $currentAssignments = @()
-            try {
-                $assignmentResponse = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$($policy.id)/assignments" -ErrorAction Stop
-                $currentAssignments = $assignmentResponse.value
-            }
-            catch {
-                Write-LogMessage -Message "Could not retrieve current assignments for $policyName, proceeding with new assignments only" -Type Warning
-            }
-            
-            # Build list of new assignments to add
-            $newAssignments = @()
-            $existingGroupIds = @()
-            
-            # Extract existing group IDs to avoid duplicates
-            foreach ($assignment in $currentAssignments) {
-                if ($assignment.target.'@odata.type' -eq "#microsoft.graph.groupAssignmentTarget") {
-                    $existingGroupIds += $assignment.target.groupId
-                }
-            }
-            
-            # Add new groups that aren't already assigned
-            foreach ($groupName in $GroupNames) {
-                if ($script:TenantState.CreatedGroups.ContainsKey($groupName)) {
-                    $groupId = $script:TenantState.CreatedGroups[$groupName]
-                    
-                    if ($existingGroupIds -notcontains $groupId) {
-                        $newAssignments += @{
-                            target = @{
-                                "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
-                                groupId = $groupId
-                            }
-                        }
-                        Write-LogMessage -Message "Adding group '$groupName' to policy '$policyName'" -Type Info -LogOnly
-                    }
-                    else {
-                        Write-LogMessage -Message "Group '$groupName' already assigned to policy '$policyName'" -Type Info -LogOnly
-                    }
-                }
-                else {
-                    Write-LogMessage -Message "Group '$groupName' not found in created groups, skipping" -Type Warning -LogOnly
-                }
-            }
-            
-            # If we have new assignments to add, update the policy
-            if ($newAssignments.Count -gt 0) {
-                # Combine existing and new assignments
-                $allAssignments = @()
-                $allAssignments += $currentAssignments
-                $allAssignments += $newAssignments
-                
-                $body = @{
-                    assignments = $allAssignments
-                }
-                
-                # Update the policy assignments
-                Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$($policy.id)/assignments" -Body $body
-                Write-LogMessage -Message "Successfully updated assignments for policy '$policyName' (added $($newAssignments.Count) new groups)" -Type Success
-            }
-            else {
-                Write-LogMessage -Message "No new groups to add to policy '$policyName'" -Type Info
-            }
-        }
-    }
-    catch {
-        Write-LogMessage -Message "Error updating existing policy assignments: $($_.Exception.Message)" -Type Error
-    }
-}
-
-function Assign-PolicyToGroups {
-    param (
-        [string]$PolicyId,
-        [array]$GroupNames
-    )
-    
-    try {
-        $assignments = @()
-        $assignedGroups = @()
-        
-        foreach ($groupName in $GroupNames) {
-            if ($script:TenantState.CreatedGroups.ContainsKey($groupName)) {
-                $groupId = $script:TenantState.CreatedGroups[$groupName]
-                $assignments += @{
-                    target = @{
-                        "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
-                        groupId = $groupId
-                    }
-                }
-                $assignedGroups += $groupName
-            }
-            else {
-                Write-LogMessage -Message "Group '$groupName' not found in created groups, skipping assignment" -Type Warning -LogOnly
-            }
-        }
-        
-        if ($assignments.Count -gt 0) {
-            $body = @{
-                assignments = $assignments
-            }
-            
-            Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$PolicyId/assignments" -Body $body
-            Write-LogMessage -Message "Assigned policy $PolicyId to groups: $($assignedGroups -join ', ')" -Type Success
-        }
-        else {
-            Write-LogMessage -Message "No valid groups found for policy assignment" -Type Warning
-        }
-    }
-    catch {
-        Write-LogMessage -Message "Failed to assign policy $PolicyId - $($_.Exception.Message)" -Type Warning
     }
 }
