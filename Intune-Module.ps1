@@ -2306,24 +2306,129 @@ function New-DisableUACPolicy {
 
 # === Helper Functions ===
 
-function Test-PolicyExists {
+function Update-ExistingPolicyAssignments {
     param (
-        [string]$PolicyName
+        [array]$PolicyNames,
+        [array]$GroupNames
     )
     
     try {
+        # Get all existing policies first
         $existingPolicies = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" -ErrorAction Stop
         
-        foreach ($policy in $existingPolicies.value) {
-            if ($policy.name -eq $PolicyName) {
-                return $true
+        foreach ($policyName in $PolicyNames) {
+            # Find the policy by name
+            $policy = $existingPolicies.value | Where-Object { $_.name -eq $policyName }
+            
+            if (-not $policy) {
+                Write-LogMessage -Message "Policy '$policyName' not found, skipping assignment update" -Type Warning
+                continue
+            }
+            
+            Write-LogMessage -Message "Updating assignments for existing policy: $policyName" -Type Info
+            
+            # Get current assignments for this policy
+            $currentAssignments = @()
+            try {
+                $assignmentResponse = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$($policy.id)/assignments" -ErrorAction Stop
+                $currentAssignments = $assignmentResponse.value
+            }
+            catch {
+                Write-LogMessage -Message "Could not retrieve current assignments for $policyName, proceeding with new assignments only" -Type Warning
+            }
+            
+            # Build list of assignments
+            $assignments = @()
+            $existingGroupIds = @()
+            $groupsToAdd = @()
+            
+            # First, preserve existing assignments
+            foreach ($assignment in $currentAssignments) {
+                $assignments += $assignment
+                if ($assignment.target.'@odata.type' -eq "#microsoft.graph.groupAssignmentTarget") {
+                    $existingGroupIds += $assignment.target.groupId
+                }
+            }
+            
+            # Add new groups that aren't already assigned
+            foreach ($groupName in $GroupNames) {
+                if ($script:TenantState.CreatedGroups.ContainsKey($groupName)) {
+                    $groupId = $script:TenantState.CreatedGroups[$groupName]
+                    
+                    if ($existingGroupIds -notcontains $groupId) {
+                        $assignments += @{
+                            id = [System.Guid]::NewGuid().ToString()  # Generate a new ID for the assignment
+                            target = @{
+                                "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
+                                groupId = $groupId
+                            }
+                        }
+                        $groupsToAdd += $groupName
+                        Write-LogMessage -Message "Adding group '$groupName' to policy '$policyName'" -Type Info -LogOnly
+                    }
+                    else {
+                        Write-LogMessage -Message "Group '$groupName' already assigned to policy '$policyName'" -Type Info -LogOnly
+                    }
+                }
+                else {
+                    Write-LogMessage -Message "Group '$groupName' not found in created groups, skipping" -Type Warning -LogOnly
+                }
+            }
+            
+            # If we have new assignments to add, update the policy
+            if ($groupsToAdd.Count -gt 0) {
+                try {
+                    # For configuration policies, we need to use the assign action
+                    $assignBody = @{
+                        assignments = $assignments
+                    }
+                    
+                    # Use the assign action endpoint
+                    $assignUri = "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$($policy.id)/assign"
+                    
+                    Invoke-MgGraphRequest -Method POST -Uri $assignUri -Body $assignBody -ErrorAction Stop
+                    Write-LogMessage -Message "Successfully updated assignments for policy '$policyName' (added groups: $($groupsToAdd -join ', '))" -Type Success
+                }
+                catch {
+                    # If assign action fails, try direct PUT to assignments
+                    try {
+                        $putBody = @{
+                            value = $assignments
+                        }
+                        
+                        Invoke-MgGraphRequest -Method PUT -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$($policy.id)/assignments" -Body $putBody -ErrorAction Stop
+                        Write-LogMessage -Message "Successfully updated assignments for policy '$policyName' using PUT method (added groups: $($groupsToAdd -join ', '))" -Type Success
+                    }
+                    catch {
+                        Write-LogMessage -Message "Failed to update assignments for policy '$policyName': $($_.Exception.Message)" -Type Error
+                        
+                        # As a last resort, try to assign just the new group individually
+                        foreach ($i in 0..($groupsToAdd.Count - 1)) {
+                            try {
+                                $singleAssignment = @{
+                                    target = @{
+                                        "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
+                                        groupId = $script:TenantState.CreatedGroups[$groupsToAdd[$i]]
+                                    }
+                                }
+                                
+                                Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$($policy.id)/assignments" -Body $singleAssignment -ErrorAction Stop
+                                Write-LogMessage -Message "Successfully added group '$($groupsToAdd[$i])' to policy '$policyName' individually" -Type Success
+                            }
+                            catch {
+                                Write-LogMessage -Message "Failed to add group '$($groupsToAdd[$i])' to policy '$policyName': $($_.Exception.Message)" -Type Warning
+                            }
+                        }
+                    }
+                }
+            }
+            else {
+                Write-LogMessage -Message "No new groups to add to policy '$policyName'" -Type Info
             }
         }
-        return $false
     }
     catch {
-        Write-LogMessage -Message "Error checking existing policies: $($_.Exception.Message)" -Type Warning -LogOnly
-        return $false
+        Write-LogMessage -Message "Error updating existing policy assignments: $($_.Exception.Message)" -Type Error
     }
 }
 
