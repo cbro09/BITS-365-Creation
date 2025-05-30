@@ -247,7 +247,7 @@ function New-PowerOptionsPolicy {
     Write-LogMessage -Message "Creating complete Power Options policy..." -Type Info
     
     $policyName = "Power Options"
-    if (Update-ExistingPolicyAssignments -PolicyName $policyName) {
+    if (Test-PolicyExists -PolicyName $policyName) {
         Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
         return @{ name = $policyName; id = "existing" }
     }
@@ -352,7 +352,7 @@ function New-DefenderAntivirusPolicy {
     Write-LogMessage -Message "Creating comprehensive Defender Antivirus policy with 27 settings..." -Type Info
     
     $policyName = "NGP Windows default policy"
-    if (Update-ExistingPolicyAssignments -PolicyName $policyName) {
+    if (Test-PolicyExists -PolicyName $policyName) {
         Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
         return @{ name = $policyName; id = "existing" }
     }
@@ -873,7 +873,7 @@ function New-BitLockerPolicy {
     Write-LogMessage -Message "Creating comprehensive BitLocker policy with 13 settings..." -Type Info
     
     $policyName = "Enable Bitlocker"
-    if (Update-ExistingPolicyAssignments -PolicyName $policyName) {
+    if (Test-PolicyExists -PolicyName $policyName) {
         Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
         return @{ name = $policyName; id = "existing" }
     }
@@ -1313,7 +1313,7 @@ function New-OneDrivePolicy {
     Write-LogMessage -Message "Creating comprehensive OneDrive policy..." -Type Info
     
     $policyName = "OneDrive Configuration"
-    if (Update-ExistingPolicyAssignments -PolicyName $policyName) {
+    if (Test-PolicyExists -PolicyName $policyName) {
         Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
         return @{ name = $policyName; id = "existing" }
     }
@@ -1471,7 +1471,7 @@ function New-EdgePolicies {
     Write-LogMessage -Message "Creating Edge policy with SharePoint homepage..." -Type Info
     
     $policyName = "Default Web Pages"
-    if (Update-ExistingPolicyAssignments -PolicyName $policyName) {
+    if (Test-PolicyExists -PolicyName $policyName) {
         Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
         return @{ name = $policyName; id = "existing" }
     }
@@ -1572,7 +1572,7 @@ function New-LAPSPolicy {
     Write-LogMessage -Message "Creating LAPS policy with domain-based admin name..." -Type Info
     
     $policyName = "LAPS"
-    if (Update-ExistingPolicyAssignments -PolicyName $policyName) {
+    if (Test-PolicyExists -PolicyName $policyName) {
         Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
         return @{ name = $policyName; id = "existing" }
     }
@@ -1737,7 +1737,7 @@ function New-DefenderPolicy {
     Write-LogMessage -Message "Creating comprehensive Defender policy..." -Type Info
     
     $policyName = "Defender Configuration"
-    if (Update-ExistingPolicyAssignments -PolicyName $policyName) {
+    if (Test-PolicyExists -PolicyName $policyName) {
         Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
         return @{ name = $policyName; id = "existing" }
     }
@@ -1777,7 +1777,7 @@ function New-FirewallPolicy {
     Write-LogMessage -Message "Creating Windows Firewall policy with template..." -Type Info
     
     $policyName = "Firewall Windows default policy"
-    if (Update-ExistingPolicyAssignments -PolicyName $policyName) {
+    if (Test-PolicyExists -PolicyName $policyName) {
         Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
         return @{ name = $policyName; id = "existing" }
     }
@@ -1917,7 +1917,7 @@ function New-TamperProtectionPolicy {
     Write-LogMessage -Message "Creating Tamper Protection policy..." -Type Info
     
     $policyName = "Tamper Protection"
-    if (Update-ExistingPolicyAssignments -PolicyName $policyName) {
+    if (Test-PolicyExists -PolicyName $policyName) {
         Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
         return @{ name = $policyName; id = "existing" }
     }
@@ -1970,7 +1970,7 @@ function New-AdminAccountPolicy {
     Write-LogMessage -Message "Creating Admin Account policy with rename..." -Type Info
     
     $policyName = "Enable Built-in Administrator Account"
-    if (Update-ExistingPolicyAssignments -PolicyName $policyName) {
+    if (Test-PolicyExists -PolicyName $policyName) {
         Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
         return @{ name = $policyName; id = "existing" }
     }
@@ -2027,7 +2027,7 @@ function New-UnenrollmentPolicy {
     Write-LogMessage -Message "Creating Device Unenrollment Prevention policy..." -Type Info
     
     $policyName = "Prevent Users From Unenrolling Devices"
-    if (Update-ExistingPolicyAssignments -PolicyName $policyName) {
+    if (Test-PolicyExists -PolicyName $policyName) {
         Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
         return @{ name = $policyName; id = "existing" }
     }
@@ -2067,7 +2067,7 @@ function New-OfficePolicies {
     Write-LogMessage -Message "Creating Office configuration policies..." -Type Info
     
     $policyName = "Office Updates Configuration"
-    if (Update-ExistingPolicyAssignments -PolicyName $policyName) {
+    if (Test-PolicyExists -PolicyName $policyName) {
         Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
         return @{ name = $policyName; id = "existing" }
     }
@@ -2107,7 +2107,7 @@ function New-OutlookPolicy {
     Write-LogMessage -Message "Creating Outlook configuration policy..." -Type Info
     
     $policyName = "Outlook Configuration"
-    if (Update-ExistingPolicyAssignments -PolicyName $policyName) {
+    if (Test-PolicyExists -PolicyName $policyName) {
         Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
         return @{ name = $policyName; id = "existing" }
     }
@@ -2147,7 +2147,7 @@ function New-EdgeUpdatePolicy {
     Write-LogMessage -Message "Creating Edge Update policy..." -Type Info
     
     $policyName = "Edge Update Policy"
-    if (Update-ExistingPolicyAssignments -PolicyName $policyName) {
+    if (Test-PolicyExists -PolicyName $policyName) {
         Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
         return @{ name = $policyName; id = "existing" }
     }
@@ -2264,7 +2264,7 @@ function New-DisableUACPolicy {
     Write-LogMessage -Message "Creating Disable UAC for QuickAssist policy..." -Type Info
     
     $policyName = "Disable UAC for Quickassist"
-    if (Update-ExistingPolicyAssignments -PolicyName $policyName) {
+    if (Test-PolicyExists -PolicyName $policyName) {
         Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
         return @{ name = $policyName; id = "existing" }
     }
@@ -2306,7 +2306,7 @@ function New-DisableUACPolicy {
 
 # === Helper Functions ===
 
-function Update-ExistingPolicyAssignments {
+function Test-PolicyExists {
     param (
         [array]$PolicyNames,
         [array]$GroupNames
