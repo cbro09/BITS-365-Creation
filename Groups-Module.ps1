@@ -34,7 +34,7 @@ function New-TenantGroups {
                 groupTypes = @("DynamicMembership")
                 mailEnabled = $false
                 mailNickname = "$($license)Users"
-                membershipRule = "user.extensionAttribute1 eq `"$license`""
+                membershipRule = "(user.extensionAttribute1 eq `"$license`") and (user.accountEnabled eq true)"
                 membershipRuleProcessingState = "On"
                 securityEnabled = $true
             }
