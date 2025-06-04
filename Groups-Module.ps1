@@ -7,7 +7,7 @@ $DefaultGroups = @{
     License = @("BusinessBasic", "BusinessStandard", "BusinessPremium", "ExchangeOnline1", "ExchangeOnline2")
 }
 
-function New-TenantGroups {
+
     Write-LogMessage -Message "Starting group creation process..." -Type Info
     Import-RequiredGraphModules
     
@@ -111,4 +111,3 @@ function New-TenantGroups {
         Write-LogMessage -Message "Error in group creation process - $($_.Exception.Message)" -Type Error
         return $false
     }
-}
