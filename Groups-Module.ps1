@@ -1,5 +1,5 @@
 # === Groups.ps1 ===
-# Group creation and management functions
+# Group creation and management functions - Direct Execution Method
 
 # Default group configuration
 $DefaultGroups = @{
@@ -9,9 +9,62 @@ $DefaultGroups = @{
 
 function New-TenantGroups {
     Write-LogMessage -Message "Starting group creation process..." -Type Info
-    Import-RequiredGraphModules
     
     try {
+        # Store core functions to prevent them being cleared
+        $writeLogFunction = ${function:Write-LogMessage}
+        $testNotEmptyFunction = ${function:Test-NotEmpty}
+        $showProgressFunction = ${function:Show-Progress}
+        
+        # Remove ALL Graph modules first to avoid conflicts
+        Write-LogMessage -Message "Clearing all Graph modules to prevent conflicts..." -Type Info
+        Get-Module Microsoft.Graph* | Remove-Module -Force -ErrorAction SilentlyContinue
+        
+        # Restore core functions
+        ${function:Write-LogMessage} = $writeLogFunction
+        ${function:Test-NotEmpty} = $testNotEmptyFunction
+        ${function:Show-Progress} = $showProgressFunction
+        
+        # Disconnect any existing sessions
+        try {
+            Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+        }
+        catch {
+            # Ignore disconnect errors
+        }
+        
+        # Force load ONLY the exact modules needed for Groups
+        $groupModules = @(
+            'Microsoft.Graph.Identity.DirectoryManagement',
+            'Microsoft.Graph.Groups'
+        )
+        
+        Write-LogMessage -Message "Loading ONLY Groups modules in exact order..." -Type Info
+        foreach ($module in $groupModules) {
+            try {
+                Get-Module $module | Remove-Module -Force -ErrorAction SilentlyContinue
+                Import-Module -Name $module -Force -ErrorAction Stop
+                $moduleInfo = Get-Module $module
+                Write-LogMessage -Message "Loaded $module version $($moduleInfo.Version)" -Type Success -LogOnly
+            }
+            catch {
+                Write-LogMessage -Message "Failed to load $module module - $($_.Exception.Message)" -Type Error
+                return $false
+            }
+        }
+        
+        # Connect with EXACT scopes needed for Groups
+        $groupScopes = @(
+            "Group.ReadWrite.All",
+            "Directory.ReadWrite.All"
+        )
+        
+        Write-LogMessage -Message "Connecting to Microsoft Graph with Groups scopes..." -Type Info
+        Connect-MgGraph -Scopes $groupScopes -ErrorAction Stop | Out-Null
+        
+        $context = Get-MgContext
+        Write-LogMessage -Message "Connected to Microsoft Graph as $($context.Account)" -Type Success
+        
         $tenantName = $script:TenantState.TenantName
         Write-LogMessage -Message "Creating groups for tenant: $tenantName" -Type Info
         
@@ -34,7 +87,7 @@ function New-TenantGroups {
                 groupTypes = @("DynamicMembership")
                 mailEnabled = $false
                 mailNickname = "$($license)Users"
-                membershipRule = "(user.extensionAttribute1 eq `"$license`") and (user.accountEnabled eq true)"
+                membershipRule = "user.extensionAttribute1 eq `"$license`""
                 membershipRuleProcessingState = "On"
                 securityEnabled = $true
             }

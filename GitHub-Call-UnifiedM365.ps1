@@ -330,7 +330,10 @@ function Import-ModuleFromCache {
         [string]$ModuleName,
         
         [Parameter(Mandatory = $false)]
-        [switch]$ForceRefresh
+        [switch]$ForceRefresh,
+        
+        [Parameter(Mandatory = $false)]
+        [switch]$DownloadOnly
     )
     
     try {
@@ -367,13 +370,19 @@ function Import-ModuleFromCache {
             return $false
         }
         
-        # Execute the module file directly in the global scope using dot sourcing with proper path
-          & {
-          param($ModulePath)
-         . $ModulePath
-          } $localPath
-        
-        Write-LogMessage -Message "Successfully loaded $ModuleName module" -Type Success
+        # Only execute if not in download-only mode
+        if (-not $DownloadOnly) {
+            # Execute the module file directly in the global scope using dot sourcing with proper path
+            & {
+                param($ModulePath)
+                . $ModulePath
+            } $localPath
+            
+            Write-LogMessage -Message "Successfully loaded $ModuleName module" -Type Success
+        }
+        else {
+            Write-LogMessage -Message "Successfully downloaded $ModuleName module (download-only mode)" -Type Success
+        }
         return $true
     }
     catch {
@@ -537,7 +546,26 @@ function Start-Setup {
                 else {
                     $moduleLoaded = Import-ModuleFromCache -ModuleName "Groups"
                     if ($moduleLoaded) {
-                        $groupsCreated = New-TenantGroups
+                        Write-LogMessage -Message "Executing Groups module directly..." -Type Info
+                        try {
+                            $fileName = $GitHubConfig.ModuleFiles["Groups"]
+                            $localPath = Join-Path -Path $GitHubConfig.CacheDirectory -ChildPath $fileName
+                            
+                            $result = & {
+                                . $localPath
+                                New-TenantGroups
+                            }
+                            
+                            if ($result) {
+                                Write-LogMessage -Message "Groups creation completed successfully" -Type Success
+                            }
+                            else {
+                                Write-LogMessage -Message "Groups creation returned false - check logs for details" -Type Warning
+                            }
+                        }
+                        catch {
+                            Write-LogMessage -Message "Groups creation failed: $($_.Exception.Message)" -Type Error
+                        }
                     }
                     else {
                         Write-LogMessage -Message "Failed to load Groups module. Please check your internet connection." -Type Error
@@ -696,7 +724,7 @@ function Start-Setup {
                 Write-LogMessage -Message "Refreshing all modules from GitHub..." -Type Info
                 $refreshCount = 0
                 foreach ($moduleName in $GitHubConfig.ModuleFiles.Keys) {
-                    $refreshed = Import-ModuleFromCache -ModuleName $moduleName -ForceRefresh
+                    $refreshed = Import-ModuleFromCache -ModuleName $moduleName -ForceRefresh -DownloadOnly
                     if ($refreshed) {
                         $refreshCount++
                     }
