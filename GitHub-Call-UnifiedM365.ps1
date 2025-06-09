@@ -267,7 +267,7 @@ function Test-TenantDomain {
 
 # === GitHub Module Loading Functions ===
 $GitHubConfig = @{
-    BaseUrl = "https://raw.githubusercontent.com/iceedd/BITS-Projects/main"
+    BaseUrl = "https://raw.githubusercontent.com/cbro09/BITS-365-Creation/main"
     CacheDirectory = "$env:TEMP\M365TenantSetup\Modules"
     ModuleFiles = @{
         "Groups" = "Groups-Module.ps1"
