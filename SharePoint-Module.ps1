@@ -11,31 +11,73 @@ $SharePointConfig = @{
 function New-TenantSharePoint {
     Write-LogMessage -Message "Starting SharePoint configuration..." -Type Info
     
-    # Clear SharePoint authentication cache to prevent conflicts
-    Write-LogMessage -Message "Clearing SharePoint authentication cache..." -Type Info
     try {
-        Disconnect-MsgGraph -ErrorAction SilentlyContinue | Out-Null
-        Disconnect-SPOService -ErrorAction SilentlyContinue | Out-Null
-        Remove-Item "$env:USERPROFILE\.mg" -Recurse -Force -ErrorAction SilentlyContinue
-    }
-    catch {
-        # Ignore cleanup errors
-    }
-    
-    # Reconnect to Microsoft Graph (needed for security group creation)
-    Write-LogMessage -Message "Reconnecting to Microsoft Graph..." -Type Info
-    try {
-        Import-RequiredGraphModules
-        Connect-MgGraph -Scopes $config.GraphScopes -ErrorAction Stop | Out-Null
+        # STEP 1: Store core functions to prevent them being cleared
+        $writeLogFunction = ${function:Write-LogMessage}
+        $testNotEmptyFunction = ${function:Test-NotEmpty}
+        $showProgressFunction = ${function:Show-Progress}
+        
+        # STEP 2: Remove ALL Graph modules first to avoid conflicts
+        Write-LogMessage -Message "Clearing all Graph modules to prevent conflicts..." -Type Info
+        Get-Module Microsoft.Graph* | Remove-Module -Force -ErrorAction SilentlyContinue
+        
+        # STEP 3: Restore core functions
+        ${function:Write-LogMessage} = $writeLogFunction
+        ${function:Test-NotEmpty} = $testNotEmptyFunction
+        ${function:Show-Progress} = $showProgressFunction
+        
+        # STEP 4: Disconnect any existing sessions
+        try {
+            Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+        }
+        catch {
+            # Ignore disconnect errors
+        }
+        
+        # STEP 5: Force load ONLY the exact modules needed for SharePoint
+        $sharePointModules = @(
+            'Microsoft.Graph.Groups',
+            'Microsoft.Graph.Identity.DirectoryManagement'
+        )
+        
+        Write-LogMessage -Message "Loading ONLY SharePoint modules in exact order..." -Type Info
+        foreach ($module in $sharePointModules) {
+            try {
+                Get-Module $module | Remove-Module -Force -ErrorAction SilentlyContinue
+                Import-Module -Name $module -Force -ErrorAction Stop
+                $moduleInfo = Get-Module $module
+                Write-LogMessage -Message "Loaded $module version $($moduleInfo.Version)" -Type Success -LogOnly
+            }
+            catch {
+                Write-LogMessage -Message "Failed to load $module module - $($_.Exception.Message)" -Type Error
+                return $false
+            }
+        }
+        
+        # STEP 6: Connect with EXACT scopes needed for SharePoint
+        $sharePointScopes = @(
+            "Group.ReadWrite.All",
+            "Directory.ReadWrite.All"
+        )
+        
+        Write-LogMessage -Message "Connecting to Microsoft Graph with SharePoint scopes..." -Type Info
+        Connect-MgGraph -Scopes $sharePointScopes -ErrorAction Stop | Out-Null
+        
         $context = Get-MgContext
-        Write-LogMessage -Message "Successfully reconnected to Microsoft Graph as $($context.Account)" -Type Success
-    }
-    catch {
-        Write-LogMessage -Message "Failed to reconnect to Microsoft Graph - $($_.Exception.Message)" -Type Error
-        return $false
-    }
-    
-    try {
+        Write-LogMessage -Message "Connected to Microsoft Graph as $($context.Account)" -Type Success
+        
+        # STEP 7: Original script logic continues unchanged
+        # Clear SharePoint authentication cache to prevent conflicts
+        Write-LogMessage -Message "Clearing SharePoint authentication cache..." -Type Info
+        try {
+            Disconnect-MsgGraph -ErrorAction SilentlyContinue | Out-Null
+            Disconnect-SPOService -ErrorAction SilentlyContinue | Out-Null
+            Remove-Item "$env:USERPROFILE\.mg" -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        catch {
+            # Ignore cleanup errors
+        }
+        
         # Get SharePoint URLs - simplified input
         $customerName = $script:TenantState.TenantName
         Write-Host "SharePoint URL Configuration" -ForegroundColor Yellow
@@ -93,7 +135,6 @@ function New-TenantSharePoint {
         
         # Create security groups for each site
         $securityGroups = @{}
-        Import-RequiredGraphModules
         
         foreach ($site in $spokeSites) {
             $siteName = $site.Name
@@ -204,7 +245,7 @@ function New-TenantSharePoint {
             }
         }
         
-        Write-LogMessage -Message "SharePoint configuration completed" -Type Success
+        Write-LogMessage -Message "SharePoint configuration completed successfully" -Type Success
         Disconnect-SPOService
         return $true
     }

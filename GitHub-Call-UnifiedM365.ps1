@@ -600,7 +600,26 @@ function Start-Setup {
                 else {
                     $moduleLoaded = Import-ModuleFromCache -ModuleName "SharePoint"
                     if ($moduleLoaded) {
-                        $sharePointSetup = New-TenantSharePoint
+                        Write-LogMessage -Message "Executing SharePoint module directly..." -Type Info
+                        try {
+                            $fileName = $GitHubConfig.ModuleFiles["SharePoint"]
+                            $localPath = Join-Path -Path $GitHubConfig.CacheDirectory -ChildPath $fileName
+                            
+                            $result = & {
+                                . $localPath
+                                New-TenantSharePoint
+                            }
+                            
+                            if ($result) {
+                                Write-LogMessage -Message "SharePoint completed successfully" -Type Success
+                            }
+                            else {
+                                Write-LogMessage -Message "SharePoint returned false - check logs for details" -Type Warning
+                            }
+                        }
+                        catch {
+                            Write-LogMessage -Message "SharePoint failed: $($_.Exception.Message)" -Type Error
+                        }
                     }
                     else {
                         Write-LogMessage -Message "Failed to load SharePoint module. Please check your internet connection." -Type Error
