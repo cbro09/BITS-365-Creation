@@ -593,40 +593,40 @@ function Start-Setup {
                 Read-Host "Press Enter to continue"
             }
             4 {
-                # Set up SharePoint
-                if (-not (Get-MgContext)) {
-                    Write-LogMessage -Message "Not connected to Microsoft Graph. Please connect first." -Type Warning
+    # Set up SharePoint
+    if (-not (Get-MgContext)) {
+        Write-LogMessage -Message "Not connected to Microsoft Graph. Please connect first." -Type Warning
+    }
+    else {
+        $moduleLoaded = Import-ModuleFromCache -ModuleName "SharePoint"
+        if ($moduleLoaded) {
+            Write-LogMessage -Message "Executing SharePoint module directly..." -Type Info
+            try {
+                $fileName = $GitHubConfig.ModuleFiles["SharePoint"]
+                $localPath = Join-Path -Path $GitHubConfig.CacheDirectory -ChildPath $fileName
+                
+                $result = & {
+                    . $localPath
+                    New-TenantSharePoint
+                }
+                
+                if ($result) {
+                    Write-LogMessage -Message "SharePoint configuration completed successfully" -Type Success
                 }
                 else {
-                    $moduleLoaded = Import-ModuleFromCache -ModuleName "SharePoint"
-                    if ($moduleLoaded) {
-                        Write-LogMessage -Message "Executing SharePoint module directly..." -Type Info
-                        try {
-                            $fileName = $GitHubConfig.ModuleFiles["SharePoint"]
-                            $localPath = Join-Path -Path $GitHubConfig.CacheDirectory -ChildPath $fileName
-                            
-                            $result = & {
-                                . $localPath
-                                New-TenantSharePoint
-                            }
-                            
-                            if ($result) {
-                                Write-LogMessage -Message "SharePoint completed successfully" -Type Success
-                            }
-                            else {
-                                Write-LogMessage -Message "SharePoint returned false - check logs for details" -Type Warning
-                            }
-                        }
-                        catch {
-                            Write-LogMessage -Message "SharePoint failed: $($_.Exception.Message)" -Type Error
-                        }
-                    }
-                    else {
-                        Write-LogMessage -Message "Failed to load SharePoint module. Please check your internet connection." -Type Error
-                    }
+                    Write-LogMessage -Message "SharePoint configuration returned false - check logs for details" -Type Warning
                 }
-                Read-Host "Press Enter to continue"
             }
+            catch {
+                Write-LogMessage -Message "SharePoint configuration failed: $($_.Exception.Message)" -Type Error
+            }
+        }
+        else {
+            Write-LogMessage -Message "Failed to load SharePoint module. Please check your internet connection." -Type Error
+        }
+    }
+    Read-Host "Press Enter to continue"
+}
             5 {
     # Configure Intune
     if (-not (Get-MgContext)) {
