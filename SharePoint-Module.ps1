@@ -1,5 +1,5 @@
 # === SharePoint.ps1 ===
-# SharePoint Online configuration and site creation functions
+# SharePoint Online configuration and site creation functions - Converted to Direct Execution
 
 # SharePoint configuration
 $SharePointConfig = @{
@@ -15,6 +15,7 @@ function New-TenantSharePoint {
         # STEP 1: Store core functions to prevent them being cleared
         $writeLogFunction = ${function:Write-LogMessage}
         $testNotEmptyFunction = ${function:Test-NotEmpty}
+        $showProgressFunction = ${function:Show-Progress}
         
         # STEP 2: Remove ALL Graph modules first to avoid conflicts
         Write-LogMessage -Message "Clearing all Graph modules to prevent conflicts..." -Type Info
@@ -23,10 +24,12 @@ function New-TenantSharePoint {
         # STEP 3: Restore core functions
         ${function:Write-LogMessage} = $writeLogFunction
         ${function:Test-NotEmpty} = $testNotEmptyFunction
+        ${function:Show-Progress} = $showProgressFunction
         
         # STEP 4: Disconnect any existing sessions
         try {
             Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+            Disconnect-SPOService -ErrorAction SilentlyContinue | Out-Null
         }
         catch {
             # Ignore disconnect errors
@@ -35,7 +38,8 @@ function New-TenantSharePoint {
         # STEP 5: Force load ONLY the exact modules needed for SharePoint
         $sharePointModules = @(
             'Microsoft.Graph.Groups',
-            'Microsoft.Graph.Identity.DirectoryManagement'
+            'Microsoft.Graph.Identity.DirectoryManagement',
+            'Microsoft.Online.SharePoint.PowerShell'
         )
         
         Write-LogMessage -Message "Loading ONLY SharePoint modules in exact order..." -Type Info
@@ -64,17 +68,7 @@ function New-TenantSharePoint {
         $context = Get-MgContext
         Write-LogMessage -Message "Connected to Microsoft Graph as $($context.Account)" -Type Success
         
-        # STEP 7: Original script logic continues unchanged but with fixes
-        # Clear SharePoint authentication cache to prevent conflicts
-        Write-LogMessage -Message "Clearing SharePoint authentication cache..." -Type Info
-        try {
-            Disconnect-SPOService -ErrorAction SilentlyContinue | Out-Null
-            Remove-Item "$env:USERPROFILE\.mg" -Recurse -Force -ErrorAction SilentlyContinue
-        }
-        catch {
-            # Ignore cleanup errors
-        }
-        
+        # STEP 7: Original SharePoint logic continues with fixes
         # Get SharePoint URLs - simplified input
         $customerName = $script:TenantState.TenantName
         Write-Host "SharePoint URL Configuration" -ForegroundColor Yellow
@@ -115,7 +109,7 @@ function New-TenantSharePoint {
             }
         }
         catch {
-            Write-LogMessage -Message "Hub site may already exist or creation failed: $($_.Exception.Message)" -Type Warning
+            Write-LogMessage -Message "Hub site may already exist or creation failed - $($_.Exception.Message)" -Type Warning
         }
         
         # Set the site as a Hub Site with proper verification
@@ -150,7 +144,7 @@ function New-TenantSharePoint {
             }
         }
         catch {
-            Write-LogMessage -Message "Hub site registration failed: $($_.Exception.Message)" -Type Error
+            Write-LogMessage -Message "Hub site registration failed - $($_.Exception.Message)" -Type Error
             Write-LogMessage -Message "Continuing without hub site functionality..." -Type Warning
         }
         
@@ -248,7 +242,7 @@ function New-TenantSharePoint {
                     if ($_.Exception.Message -like "*already exists*" -or $_.Exception.Message -like "*site collection*already*") {
                         Write-LogMessage -Message "$siteName site already exists: $siteUrl" -Type Warning
                     } else {
-                        Write-LogMessage -Message "Failed to create $siteName site: $($_.Exception.Message)" -Type Error
+                        Write-LogMessage -Message "Failed to create $siteName site - $($_.Exception.Message)" -Type Error
                         continue
                     }
                 }
@@ -271,7 +265,7 @@ function New-TenantSharePoint {
                     Write-LogMessage -Message "$siteName site already associated with hub" -Type Warning
                 }
                 else {
-                    Write-LogMessage -Message "Failed to associate $siteName site with hub: $($_.Exception.Message)" -Type Warning
+                    Write-LogMessage -Message "Failed to associate $siteName site with hub - $($_.Exception.Message)" -Type Warning
                 }
             }
         }
@@ -331,7 +325,7 @@ function New-TenantSharePoint {
                 Start-Sleep -Seconds 5
             }
             catch {
-                Write-LogMessage -Message "Failed to set site collection admin for $siteUrl : $($_.Exception.Message)" -Type Error
+                Write-LogMessage -Message "Failed to set site collection admin for $siteUrl - $($_.Exception.Message)" -Type Error
                 Write-LogMessage -Message "This may cause security group assignment to fail for this site" -Type Warning
             }
             
@@ -364,7 +358,7 @@ function New-TenantSharePoint {
                             $success = $true
                         }
                         else {
-                            Write-LogMessage -Message "Standard method failed for $siteName $groupType: $($_.Exception.Message)" -Type Warning
+                            Write-LogMessage -Message "Standard method failed for $siteName $groupType - $($_.Exception.Message)" -Type Warning
                         }
                     }
                     
@@ -387,7 +381,7 @@ function New-TenantSharePoint {
                             $success = $true
                         }
                         catch {
-                            Write-LogMessage -Message "Alternative method also failed for $siteName $groupType: $($_.Exception.Message)" -Type Warning
+                            Write-LogMessage -Message "Alternative method also failed for $siteName $groupType - $($_.Exception.Message)" -Type Warning
                         }
                     }
                     
@@ -416,7 +410,7 @@ function New-TenantSharePoint {
                             }
                         }
                         catch {
-                            Write-LogMessage -Message "Direct group reference method also failed for $siteName $groupType: $($_.Exception.Message)" -Type Warning
+                            Write-LogMessage -Message "Direct group reference method also failed for $siteName $groupType - $($_.Exception.Message)" -Type Warning
                         }
                     }
                     
@@ -437,18 +431,7 @@ function New-TenantSharePoint {
         # Complete permissions configuration progress
         Write-Progress -Id 5 -Activity "Configuring Site Permissions" -Completed
         
-        # Provide manual configuration guidance if needed
-        $failedOperations = 0
-        foreach ($site in $spokeSites) {
-            foreach ($groupType in @("Members", "Owners", "Visitors")) {
-                $groupKey = "$($site.Name)-$groupType"
-                if ($securityGroups.ContainsKey($groupKey)) {
-                    # This is a placeholder - in a real implementation you'd track success/failure
-                    # For now, we'll provide the manual steps regardless
-                }
-            }
-        }
-        
+        # Provide manual configuration guidance
         Write-LogMessage -Message "If any security group assignments failed, you can manually configure them:" -Type Info
         Write-LogMessage -Message "1. SharePoint Admin Center: https://$tenantName-admin.sharepoint.com" -Type Info
         Write-LogMessage -Message "   → Active Sites → Select site → Permissions → Add security groups" -Type Info
