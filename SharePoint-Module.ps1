@@ -586,7 +586,7 @@ function New-TenantSharePoint {
             Write-LogMessage -Message "Manual security group configuration required" -Type Warning
             Write-LogMessage -Message "Method 1 - SharePoint Admin Center" -Type Info
             Write-LogMessage -Message "  1. Go to https://$tenantName-admin.sharepoint.com" -Type Info
-            Write-LogMessage -Message "  2. Select Active Sites then Choose a site then Permissions" -Type Info
+            Write-LogMessage -Message "  2. Select Active Sites then choose a site then Permissions" -Type Info
             Write-LogMessage -Message "  3. Add the security groups listed above to appropriate SharePoint groups" -Type Info
             Write-LogMessage -Message "Method 2 - Install PnP PowerShell and re-run" -Type Info
             Write-LogMessage -Message "  Install-Module PnP.PowerShell -Scope CurrentUser -Force" -Type Info
