@@ -193,6 +193,11 @@ function New-TenantSharePoint {
                 $registrationSuccess = $false
                 
                 # Try different registration approaches
+                Write-Host ""
+                Write-Host "GUIDANCE: If prompted for 'Principals[0]:', simply press ENTER to continue" -ForegroundColor Yellow
+                Write-Host "This allows anyone with appropriate permissions to associate sites with this hub" -ForegroundColor Cyan
+                Write-Host ""
+                
                 try {
                     Register-SPOHubSite -Site $hubSiteUrl
                     $registrationSuccess = $true
@@ -249,6 +254,7 @@ function New-TenantSharePoint {
         
         # Create security groups for spoke sites
         $securityGroups = @{}
+        $newGroupsCreated = 0
         Write-LogMessage -Message "Creating security groups for spoke sites..." -Type Info
         
         foreach ($site in $spokeSites) {
@@ -263,6 +269,7 @@ function New-TenantSharePoint {
                     try {
                         $newGroup = New-MgGroup -DisplayName $groupName -MailEnabled:$false -MailNickname "$siteName-SPO-$groupType" -SecurityEnabled:$true
                         $securityGroups["$siteName-$groupType"] = $newGroup.Id
+                        $newGroupsCreated++
                         Write-LogMessage -Message "Security group created - $groupName" -Type Success
                     } catch {
                         Write-LogMessage -Message "Failed to create security group $groupName - $($_.Exception.Message)" -Type Error
@@ -275,12 +282,17 @@ function New-TenantSharePoint {
             }
         }
         
-        # Wait for group propagation
-        Write-LogMessage -Message "Waiting for security groups to propagate (2 minutes)..." -Type Info
-        Start-Sleep -Seconds 120
+        # Smart wait for group propagation - only if new groups were created
+        if ($newGroupsCreated -gt 0) {
+            Write-LogMessage -Message "Waiting for $newGroupsCreated new security groups to propagate (2 minutes)..." -Type Info
+            Start-Sleep -Seconds 120
+        } else {
+            Write-LogMessage -Message "No new security groups created - skipping propagation wait" -Type Info
+        }
         
         # Create spoke sites
         $createdSites = @()
+        $newSitesCreated = 0
         Write-LogMessage -Message "Creating spoke sites..." -Type Info
         
         foreach ($site in $spokeSites) {
@@ -289,16 +301,58 @@ function New-TenantSharePoint {
             
             try {
                 $existingSpokeSite = $null
+                $siteInRecycleBin = $false
+                
+                # First check if site exists
                 try {
                     $existingSpokeSite = Get-SPOSite -Identity $siteUrl -ErrorAction Stop
                     Write-LogMessage -Message "$siteName site already exists at $siteUrl" -Type Warning
                     $createdSites += $siteUrl
+                    continue
                 }
                 catch {
+                    # Site doesn't exist, check recycle bin
+                    try {
+                        $deletedSite = Get-SPODeletedSite | Where-Object { $_.Url -eq $siteUrl }
+                        if ($deletedSite) {
+                            $siteInRecycleBin = $true
+                            Write-Host ""
+                            Write-Host "SITE IN RECYCLE BIN DETECTED" -ForegroundColor Yellow
+                            Write-Host "Site '$siteName' found in recycle bin at $siteUrl" -ForegroundColor Cyan
+                            Write-Host "To create a new site, the deleted site must be permanently removed." -ForegroundColor White
+                            $deleteChoice = Read-Host "Permanently delete '$siteName' from recycle bin and create new site? (Y/N)"
+                            
+                            if ($deleteChoice -eq 'Y' -or $deleteChoice -eq 'y') {
+                                try {
+                                    Remove-SPODeletedSite -Identity $siteUrl -Confirm:$false -ErrorAction Stop
+                                    Write-LogMessage -Message "Permanently deleted '$siteName' from recycle bin" -Type Success
+                                    Start-Sleep -Seconds 30  # Wait for deletion to process
+                                }
+                                catch {
+                                    Write-LogMessage -Message "Failed to delete '$siteName' from recycle bin - $($_.Exception.Message)" -Type Error
+                                    Write-LogMessage -Message "Skipping creation of $siteName - manual cleanup required" -Type Warning
+                                    continue
+                                }
+                            }
+                            else {
+                                Write-LogMessage -Message "Skipping creation of '$siteName' - site remains in recycle bin" -Type Warning
+                                continue
+                            }
+                        }
+                    }
+                    catch {
+                        # Error checking recycle bin - continue with creation attempt
+                        Write-LogMessage -Message "Could not check recycle bin for $siteName - proceeding with creation" -Type Warning
+                    }
+                }
+                
+                # Create the site (either no existing site found, or recycle bin was cleaned)
+                if (-not $existingSpokeSite) {
                     Write-LogMessage -Message "Creating $siteName site..." -Type Info
                     New-SPOSite -Url $siteUrl -Owner $ownerEmail -StorageQuota $SharePointConfig.StorageQuota -Title "$siteName" -Template $SharePointConfig.SiteTemplate
                     Write-LogMessage -Message "$siteName site created at $siteUrl" -Type Success
                     $createdSites += $siteUrl
+                    $newSitesCreated++
                 }
             }
             catch {
@@ -307,9 +361,13 @@ function New-TenantSharePoint {
             }
         }
         
-        # Wait for site provisioning
-        Write-LogMessage -Message "Waiting for SharePoint sites to provision (3 minutes)..." -Type Info
-        Start-Sleep -Seconds 180
+        # Smart wait for site provisioning - only if new sites were created
+        if ($newSitesCreated -gt 0) {
+            Write-LogMessage -Message "Waiting for $newSitesCreated new SharePoint sites to provision (3 minutes)..." -Type Info
+            Start-Sleep -Seconds 180
+        } else {
+            Write-LogMessage -Message "No new sites created - skipping provisioning wait" -Type Info
+        }
         
         # Associate spoke sites with root hub
         if ($hubSiteId) {
@@ -432,7 +490,13 @@ function New-TenantSharePoint {
         Write-LogMessage -Message "SharePoint configuration completed!" -Type Success
         Write-LogMessage -Message "Root Hub Site '$customerName Hub' at $hubSiteUrl" -Type Info
         
-        Write-LogMessage -Message "Spoke site URLs created" -Type Info
+        # Show creation summary
+        Write-LogMessage -Message "Configuration Summary" -Type Info
+        Write-LogMessage -Message "  New Security Groups Created: $newGroupsCreated" -Type Info
+        Write-LogMessage -Message "  New Sites Created: $newSitesCreated" -Type Info
+        Write-LogMessage -Message "  Total Sites Configured: $($createdSites.Count)" -Type Info
+        
+        Write-LogMessage -Message "Spoke site URLs configured" -Type Info
         foreach ($siteUrl in $createdSites) {
             $siteName = ($spokeSites | Where-Object { $_.URL -eq $siteUrl }).Name
             $outputMsg = "   $siteName - $siteUrl"
