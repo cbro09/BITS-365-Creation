@@ -397,7 +397,7 @@ function New-TenantSharePoint {
                                     Write-LogMessage -Message "'$groupDisplayName' already exists in $siteName $sharePointGroupName" -Type Warning
                                 }
                                 else {
-                                    Write-LogMessage -Message "Failed to add '$groupDisplayName' to $siteName: $($_.Exception.Message)" -Type Warning
+                                    Write-LogMessage -Message "Failed to add '$groupDisplayName' to ${siteName}: $($_.Exception.Message)" -Type Warning
                                     $groupAssignmentSuccess = $false
                                 }
                             }
@@ -434,7 +434,7 @@ function New-TenantSharePoint {
         Write-LogMessage -Message "Spoke site URLs created:" -Type Info
         foreach ($siteUrl in $createdSites) {
             $siteName = ($spokeSites | Where-Object { $_.URL -eq $siteUrl }).Name
-            Write-LogMessage -Message "   $siteName: $siteUrl" -Type Info
+            Write-LogMessage -Message "   ${siteName}: $siteUrl" -Type Info
         }
         
         if (-not $pnpAvailable -or -not $groupAssignmentSuccess) {
