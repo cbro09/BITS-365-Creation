@@ -83,12 +83,12 @@ function New-TenantSharePoint {
         Write-LogMessage -Message "Validating SharePoint prerequisites..." -Type Info
         
         if (-not $script:TenantState) {
-            Write-LogMessage -Message "ERROR: TenantState not initialized. Please run 'Connect to Microsoft Graph and Verify Tenant' first." -Type Error
+            Write-LogMessage -Message "ERROR - TenantState not initialized. Please run 'Connect to Microsoft Graph and Verify Tenant' first." -Type Error
             return $false
         }
         
         if ([string]::IsNullOrWhiteSpace($script:TenantState.TenantName)) {
-            Write-LogMessage -Message "ERROR: Tenant name not found in TenantState" -Type Error
+            Write-LogMessage -Message "ERROR - Tenant name not found in TenantState" -Type Error
             return $false
         }
         
@@ -97,7 +97,7 @@ function New-TenantSharePoint {
         # Get SharePoint URLs and email configuration
         $customerName = $script:TenantState.TenantName
         Write-Host "SharePoint URL Configuration" -ForegroundColor Yellow
-        Write-Host "Example: If your tenant is 'm365x36060197.sharepoint.com', enter 'm365x36060197'" -ForegroundColor Cyan
+        Write-Host "Example - If your tenant is 'm365x36060197.sharepoint.com', enter 'm365x36060197'" -ForegroundColor Cyan
         $tenantName = Read-Host "Enter your SharePoint tenant name (without .sharepoint.com)"
         
         # Construct URLs automatically - Root site as hub
@@ -109,8 +109,8 @@ function New-TenantSharePoint {
         $ownerEmail = $script:TenantState.AdminEmail
         $currentUserEmail = $context.Account
         
-        Write-LogMessage -Message "Owner Email from TenantState: '$ownerEmail'" -Type Info
-        Write-LogMessage -Message "Current User Email from Context: '$currentUserEmail'" -Type Info
+        Write-LogMessage -Message "Owner Email from TenantState - '$ownerEmail'" -Type Info
+        Write-LogMessage -Message "Current User Email from Context - '$currentUserEmail'" -Type Info
         
         if ([string]::IsNullOrWhiteSpace($ownerEmail)) {
             Write-LogMessage -Message "Owner email is empty, prompting for input..." -Type Warning
@@ -122,11 +122,11 @@ function New-TenantSharePoint {
             $currentUserEmail = $ownerEmail
         }
         
-        Write-LogMessage -Message "Using Owner Email: '$ownerEmail'" -Type Info
-        Write-LogMessage -Message "Using Current User Email: '$currentUserEmail'" -Type Info
-        Write-LogMessage -Message "SharePoint Admin URL: $adminUrl" -Type Info
-        Write-LogMessage -Message "SharePoint Tenant URL: $tenantUrl" -Type Info
-        Write-LogMessage -Message "Hub Site (Root): $hubSiteUrl" -Type Info
+        Write-LogMessage -Message "Using Owner Email - '$ownerEmail'" -Type Info
+        Write-LogMessage -Message "Using Current User Email - '$currentUserEmail'" -Type Info
+        Write-LogMessage -Message "SharePoint Admin URL - $adminUrl" -Type Info
+        Write-LogMessage -Message "SharePoint Tenant URL - $tenantUrl" -Type Info
+        Write-LogMessage -Message "Hub Site (Root) - $hubSiteUrl" -Type Info
         
         # Connect to SharePoint Online
         Write-LogMessage -Message "Connecting to SharePoint Online Admin Center..." -Type Info
@@ -139,7 +139,7 @@ function New-TenantSharePoint {
                 Write-LogMessage -Message "SharePoint Administrator permissions verified" -Type Success
             }
             catch {
-                Write-LogMessage -Message "WARNING: Connected but may not have SharePoint Administrator permissions" -Type Warning
+                Write-LogMessage -Message "WARNING - Connected but may not have SharePoint Administrator permissions" -Type Warning
             }
         }
         catch {
@@ -151,14 +151,14 @@ function New-TenantSharePoint {
         Write-LogMessage -Message "Verifying root site for hub registration..." -Type Info
         try {
             $rootSiteInfo = Get-SPOSite -Identity $hubSiteUrl -Detailed -ErrorAction Stop
-            Write-LogMessage -Message "Root site found - Title: '$($rootSiteInfo.Title)', Template: $($rootSiteInfo.Template)" -Type Success
+            Write-LogMessage -Message "Root site found - Title '$($rootSiteInfo.Title)', Template $($rootSiteInfo.Template)" -Type Success
             
             # Update root site title to reflect hub status
             $hubSiteTitle = "$customerName Hub"
             if ($rootSiteInfo.Title -ne $hubSiteTitle) {
                 try {
                     Set-SPOSite -Identity $hubSiteUrl -Title $hubSiteTitle -ErrorAction Stop
-                    Write-LogMessage -Message "Root site title updated to: '$hubSiteTitle'" -Type Success
+                    Write-LogMessage -Message "Root site title updated to '$hubSiteTitle'" -Type Success
                 }
                 catch {
                     Write-LogMessage -Message "Could not update root site title - $($_.Exception.Message)" -Type Warning
@@ -166,7 +166,7 @@ function New-TenantSharePoint {
             }
         }
         catch {
-            Write-LogMessage -Message "ERROR: Cannot access root site at $hubSiteUrl - $($_.Exception.Message)" -Type Error
+            Write-LogMessage -Message "ERROR - Cannot access root site at $hubSiteUrl - $($_.Exception.Message)" -Type Error
             return $false
         }
         
@@ -181,7 +181,7 @@ function New-TenantSharePoint {
                 $hubSiteId = $isAlreadyHub.ID
             }
             else {
-                Write-LogMessage -Message "Root site template: $($rootSiteInfo.Template), Status: $($rootSiteInfo.Status)" -Type Info
+                Write-LogMessage -Message "Root site template $($rootSiteInfo.Template), Status $($rootSiteInfo.Status)" -Type Info
                 
                 # Check if root site is associated with another hub (unlikely but possible)
                 if ($rootSiteInfo.HubSiteId -and $rootSiteInfo.HubSiteId -ne "00000000-0000-0000-0000-000000000000") {
@@ -211,7 +211,7 @@ function New-TenantSharePoint {
                             Write-LogMessage -Message "Root site registered as hub successfully (with owner)" -Type Success
                         }
                         catch {
-                            Write-LogMessage -Message "All hub registration approaches failed: $($_.Exception.Message)" -Type Error
+                            Write-LogMessage -Message "All hub registration approaches failed - $($_.Exception.Message)" -Type Error
                         }
                     }
                 }
@@ -253,7 +253,7 @@ function New-TenantSharePoint {
         
         foreach ($site in $spokeSites) {
             $siteName = $site.Name
-            Write-LogMessage -Message "Creating security groups for site: $siteName" -Type Info
+            Write-LogMessage -Message "Creating security groups for site $siteName" -Type Info
             
             foreach ($groupType in @("Members", "Owners", "Visitors")) {
                 $groupName = "$siteName SharePoint $groupType"
@@ -263,14 +263,14 @@ function New-TenantSharePoint {
                     try {
                         $newGroup = New-MgGroup -DisplayName $groupName -MailEnabled:$false -MailNickname "$siteName-SPO-$groupType" -SecurityEnabled:$true
                         $securityGroups["$siteName-$groupType"] = $newGroup.Id
-                        Write-LogMessage -Message "Security group created: $groupName" -Type Success
+                        Write-LogMessage -Message "Security group created - $groupName" -Type Success
                     } catch {
-                        Write-LogMessage -Message "Failed to create security group: $groupName - $($_.Exception.Message)" -Type Error
+                        Write-LogMessage -Message "Failed to create security group $groupName - $($_.Exception.Message)" -Type Error
                         continue
                     }
                 } else {
                     $securityGroups["$siteName-$groupType"] = $existingGroup.Id
-                    Write-LogMessage -Message "Security group already exists: $groupName" -Type Warning
+                    Write-LogMessage -Message "Security group already exists - $groupName" -Type Warning
                 }
             }
         }
@@ -291,13 +291,13 @@ function New-TenantSharePoint {
                 $existingSpokeSite = $null
                 try {
                     $existingSpokeSite = Get-SPOSite -Identity $siteUrl -ErrorAction Stop
-                    Write-LogMessage -Message "$siteName site already exists: $siteUrl" -Type Warning
+                    Write-LogMessage -Message "$siteName site already exists at $siteUrl" -Type Warning
                     $createdSites += $siteUrl
                 }
                 catch {
                     Write-LogMessage -Message "Creating $siteName site..." -Type Info
                     New-SPOSite -Url $siteUrl -Owner $ownerEmail -StorageQuota $SharePointConfig.StorageQuota -Title "$siteName" -Template $SharePointConfig.SiteTemplate
-                    Write-LogMessage -Message "$siteName site created: $siteUrl" -Type Success
+                    Write-LogMessage -Message "$siteName site created at $siteUrl" -Type Success
                     $createdSites += $siteUrl
                 }
             }
@@ -397,7 +397,8 @@ function New-TenantSharePoint {
                                     Write-LogMessage -Message "'$groupDisplayName' already exists in $siteName $sharePointGroupName" -Type Warning
                                 }
                                 else {
-                                    Write-LogMessage -Message "Failed to add '$groupDisplayName' to ${siteName}: $($_.Exception.Message)" -Type Warning
+                                    $errorMsg = "Failed to add '$groupDisplayName' to $siteName - $($_.Exception.Message)"
+                                    Write-LogMessage -Message $errorMsg -Type Warning
                                     $groupAssignmentSuccess = $false
                                 }
                             }
@@ -409,7 +410,7 @@ function New-TenantSharePoint {
                     
                 }
                 catch {
-                    Write-LogMessage -Message "Failed to connect to $siteName with PnP PowerShell: $($_.Exception.Message)" -Type Error
+                    Write-LogMessage -Message "Failed to connect to $siteName with PnP PowerShell - $($_.Exception.Message)" -Type Error
                     $groupAssignmentSuccess = $false
                 }
                 
@@ -429,18 +430,19 @@ function New-TenantSharePoint {
         
         # Final results and guidance
         Write-LogMessage -Message "SharePoint configuration completed!" -Type Success
-        Write-LogMessage -Message "Root Hub Site: '$customerName Hub' at $hubSiteUrl" -Type Info
+        Write-LogMessage -Message "Root Hub Site '$customerName Hub' at $hubSiteUrl" -Type Info
         
-        Write-LogMessage -Message "Spoke site URLs created:" -Type Info
+        Write-LogMessage -Message "Spoke site URLs created" -Type Info
         foreach ($siteUrl in $createdSites) {
             $siteName = ($spokeSites | Where-Object { $_.URL -eq $siteUrl }).Name
-            Write-LogMessage -Message "   ${siteName}: $siteUrl" -Type Info
+            $outputMsg = "   $siteName - $siteUrl"
+            Write-LogMessage -Message $outputMsg -Type Info
         }
         
         if (-not $pnpAvailable -or -not $groupAssignmentSuccess) {
-            Write-LogMessage -Message "Manual security group configuration options:" -Type Info
-            Write-LogMessage -Message "1. SharePoint Admin Center: https://$tenantName-admin.sharepoint.com" -Type Info
-            Write-LogMessage -Message "2. Install PnP PowerShell: Install-Module PnP.PowerShell -Scope CurrentUser" -Type Info
+            Write-LogMessage -Message "Manual security group configuration options" -Type Info
+            Write-LogMessage -Message "1. SharePoint Admin Center at https://$tenantName-admin.sharepoint.com" -Type Info
+            Write-LogMessage -Message "2. Install PnP PowerShell with Install-Module PnP.PowerShell -Scope CurrentUser" -Type Info
             Write-LogMessage -Message "3. For each site, add the corresponding security groups to SharePoint groups" -Type Info
         }
         
