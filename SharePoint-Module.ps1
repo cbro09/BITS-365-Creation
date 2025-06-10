@@ -64,7 +64,17 @@ function New-TenantSharePoint {
             Write-LogMessage -Message "PnP PowerShell module loaded - will use for security group assignment" -Type Success
         }
         catch {
-            Write-LogMessage -Message "PnP PowerShell not available - will provide manual instructions" -Type Warning
+            Write-LogMessage -Message "PnP PowerShell not found - attempting to install..." -Type Warning
+            try {
+                Install-Module PnP.PowerShell -Scope CurrentUser -Force -AllowClobber -ErrorAction Stop
+                Import-Module PnP.PowerShell -Force -ErrorAction Stop
+                $pnpAvailable = $true
+                Write-LogMessage -Message "PnP PowerShell installed and loaded successfully" -Type Success
+            }
+            catch {
+                Write-LogMessage -Message "Failed to install PnP PowerShell - will use alternative method" -Type Warning
+                $pnpAvailable = $false
+            }
         }
         
         # STEP 6: Connect to Microsoft Graph
@@ -424,9 +434,11 @@ function New-TenantSharePoint {
         }
         
         # AUTOMATED SECURITY GROUP ASSIGNMENT using PnP PowerShell
+        $groupAssignmentSuccess = $true
+        $fallbackSuccess = $true
+        
         if ($pnpAvailable) {
             Write-LogMessage -Message "Starting automated security group assignment using PnP PowerShell..." -Type Info
-            $groupAssignmentSuccess = $true
             
             foreach ($site in $spokeSites) {
                 $siteUrl = $site.URL
@@ -483,18 +495,77 @@ function New-TenantSharePoint {
             }
         }
         else {
-            Write-LogMessage -Message "PnP PowerShell not available - security groups created but not assigned to sites" -Type Warning
+            # FALLBACK: Use standard SharePoint Online Management Shell for group assignment
+            Write-LogMessage -Message "Using SharePoint Online Management Shell for security group assignment..." -Type Info
+            $groupAssignmentSuccess = $false  # This method doesn't use the same variable
+            
+            foreach ($site in $spokeSites) {
+                $siteUrl = $site.URL
+                $siteName = $site.Name
+                
+                Write-LogMessage -Message "Attempting to configure security groups for $siteName using SPO commands..." -Type Info
+                
+                foreach ($groupType in @("Members", "Owners", "Visitors")) {
+                    $groupKey = "$siteName-$groupType"
+                    $groupDisplayName = "$siteName SharePoint $groupType"
+                    $sharePointGroupName = "$siteName $groupType"
+                    
+                    if ($securityGroups.ContainsKey($groupKey)) {
+                        $groupId = $securityGroups[$groupKey]
+                        $claimFormat = "c:0t.c|tenant|$groupId"
+                        
+                        try {
+                            Add-SPOUser -Site $siteUrl -LoginName $claimFormat -Group $sharePointGroupName -ErrorAction Stop
+                            Write-LogMessage -Message "Added '$groupDisplayName' to $siteName using SPO commands" -Type Success
+                        }
+                        catch {
+                            if ($_.Exception.Message -like "*already exists*" -or $_.Exception.Message -like "*already a member*") {
+                                Write-LogMessage -Message "'$groupDisplayName' already assigned to $siteName" -Type Warning
+                            }
+                            else {
+                                Write-LogMessage -Message "SPO command failed for $siteName $groupType - $($_.Exception.Message)" -Type Warning
+                                $fallbackSuccess = $false
+                            }
+                        }
+                    }
+                }
+                
+                Start-Sleep -Seconds 1
+            }
+            
+            if ($fallbackSuccess) {
+                Write-LogMessage -Message "Security group assignment completed using SPO commands!" -Type Success
+            }
+            else {
+                Write-LogMessage -Message "Some assignments failed with SPO commands - manual configuration needed" -Type Warning
+            }
         }
         
         # Final results and guidance
         Write-LogMessage -Message "SharePoint configuration completed!" -Type Success
         Write-LogMessage -Message "Root Hub Site '$customerName Hub' at $hubSiteUrl" -Type Info
         
-        # Show creation summary
+        # Show creation summary and security groups status
         Write-LogMessage -Message "Configuration Summary" -Type Info
         Write-LogMessage -Message "  New Security Groups Created: $newGroupsCreated" -Type Info
         Write-LogMessage -Message "  New Sites Created: $newSitesCreated" -Type Info
         Write-LogMessage -Message "  Total Sites Configured: $($createdSites.Count)" -Type Info
+        
+        # Show security groups status
+        if ($securityGroups.Count -gt 0) {
+            Write-LogMessage -Message "Security Groups Available for Assignment" -Type Info
+            foreach ($site in $spokeSites) {
+                $siteName = $site.Name
+                Write-LogMessage -Message "  $siteName Site Groups" -Type Info
+                foreach ($groupType in @("Members", "Owners", "Visitors")) {
+                    $groupKey = "$siteName-$groupType"
+                    if ($securityGroups.ContainsKey($groupKey)) {
+                        $groupDisplayName = "$siteName SharePoint $groupType"
+                        Write-LogMessage -Message "    ✓ $groupDisplayName" -Type Info
+                    }
+                }
+            }
+        }
         
         Write-LogMessage -Message "Spoke site URLs configured" -Type Info
         foreach ($siteUrl in $createdSites) {
@@ -503,11 +574,25 @@ function New-TenantSharePoint {
             Write-LogMessage -Message $outputMsg -Type Info
         }
         
-        if (-not $pnpAvailable -or -not $groupAssignmentSuccess) {
-            Write-LogMessage -Message "Manual security group configuration options" -Type Info
-            Write-LogMessage -Message "1. SharePoint Admin Center at https://$tenantName-admin.sharepoint.com" -Type Info
-            Write-LogMessage -Message "2. Install PnP PowerShell with Install-Module PnP.PowerShell -Scope CurrentUser" -Type Info
-            Write-LogMessage -Message "3. For each site, add the corresponding security groups to SharePoint groups" -Type Info
+        # Check if manual configuration is needed
+        $needsManualConfig = $false
+        if ($pnpAvailable -and -not $groupAssignmentSuccess) {
+            $needsManualConfig = $true
+        } elseif (-not $pnpAvailable -and -not $fallbackSuccess) {
+            $needsManualConfig = $true
+        }
+        
+        if ($needsManualConfig) {
+            Write-LogMessage -Message "Manual security group configuration required" -Type Warning
+            Write-LogMessage -Message "Method 1 - SharePoint Admin Center" -Type Info
+            Write-LogMessage -Message "  1. Go to https://$tenantName-admin.sharepoint.com" -Type Info
+            Write-LogMessage -Message "  2. Select Active Sites > Choose a site > Permissions" -Type Info
+            Write-LogMessage -Message "  3. Add the security groups listed above to appropriate SharePoint groups" -Type Info
+            Write-LogMessage -Message "Method 2 - Install PnP PowerShell and re-run" -Type Info
+            Write-LogMessage -Message "  Install-Module PnP.PowerShell -Scope CurrentUser -Force" -Type Info
+            Write-LogMessage -Message "  Then re-run SharePoint configuration (Option 4)" -Type Info
+        } else {
+            Write-LogMessage -Message "Security group assignment completed successfully!" -Type Success
         }
         
         Write-LogMessage -Message "Navigation and search integration will be available from the root site hub" -Type Info
