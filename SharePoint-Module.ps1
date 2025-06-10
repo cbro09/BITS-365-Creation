@@ -1,5 +1,5 @@
 # === SharePoint.ps1 ===
-# SharePoint Online configuration and site creation functions - Fixed Hub Site Registration
+# SharePoint Online configuration with Root Site as Hub and automated security group assignment
 
 # SharePoint configuration
 $SharePointConfig = @{
@@ -35,14 +35,14 @@ function New-TenantSharePoint {
             # Ignore disconnect errors
         }
         
-        # STEP 5: Force load ONLY the exact modules needed for SharePoint
+        # STEP 5: Force load modules including PnP PowerShell for better group management
         $sharePointModules = @(
             'Microsoft.Graph.Groups',
             'Microsoft.Graph.Identity.DirectoryManagement',
             'Microsoft.Online.SharePoint.PowerShell'
         )
         
-        Write-LogMessage -Message "Loading ONLY SharePoint modules in exact order..." -Type Info
+        Write-LogMessage -Message "Loading SharePoint modules..." -Type Info
         foreach ($module in $sharePointModules) {
             try {
                 Get-Module $module | Remove-Module -Force -ErrorAction SilentlyContinue
@@ -56,7 +56,18 @@ function New-TenantSharePoint {
             }
         }
         
-        # STEP 6: Connect with EXACT scopes needed for SharePoint
+        # Check if PnP PowerShell is available for better group management
+        $pnpAvailable = $false
+        try {
+            Import-Module PnP.PowerShell -Force -ErrorAction Stop
+            $pnpAvailable = $true
+            Write-LogMessage -Message "PnP PowerShell module loaded - will use for security group assignment" -Type Success
+        }
+        catch {
+            Write-LogMessage -Message "PnP PowerShell not available - will provide manual instructions" -Type Warning
+        }
+        
+        # STEP 6: Connect to Microsoft Graph
         $sharePointScopes = @(
             "Group.ReadWrite.All",
             "Directory.ReadWrite.All"
@@ -68,26 +79,39 @@ function New-TenantSharePoint {
         $context = Get-MgContext
         Write-LogMessage -Message "Connected to Microsoft Graph as $($context.Account)" -Type Success
         
-        # STEP 7: SharePoint configuration with improved hub site handling
-        # Get SharePoint URLs - simplified input
+        # STEP 7: Validate prerequisites
+        Write-LogMessage -Message "Validating SharePoint prerequisites..." -Type Info
+        
+        if (-not $script:TenantState) {
+            Write-LogMessage -Message "ERROR: TenantState not initialized. Please run 'Connect to Microsoft Graph and Verify Tenant' first." -Type Error
+            return $false
+        }
+        
+        if ([string]::IsNullOrWhiteSpace($script:TenantState.TenantName)) {
+            Write-LogMessage -Message "ERROR: Tenant name not found in TenantState" -Type Error
+            return $false
+        }
+        
+        Write-LogMessage -Message "Prerequisites validation completed" -Type Success
+        
+        # Get SharePoint URLs and email configuration
         $customerName = $script:TenantState.TenantName
         Write-Host "SharePoint URL Configuration" -ForegroundColor Yellow
         Write-Host "Example: If your tenant is 'm365x36060197.sharepoint.com', enter 'm365x36060197'" -ForegroundColor Cyan
         $tenantName = Read-Host "Enter your SharePoint tenant name (without .sharepoint.com)"
         
-        # Construct URLs automatically
+        # Construct URLs automatically - Root site as hub
         $adminUrl = "https://$tenantName-admin.sharepoint.com"
         $tenantUrl = "https://$tenantName.sharepoint.com"
+        $hubSiteUrl = $tenantUrl  # Root site as hub
         
         # Get and validate email addresses
         $ownerEmail = $script:TenantState.AdminEmail
         $currentUserEmail = $context.Account
         
-        # Debug email addresses
         Write-LogMessage -Message "Owner Email from TenantState: '$ownerEmail'" -Type Info
         Write-LogMessage -Message "Current User Email from Context: '$currentUserEmail'" -Type Info
         
-        # Validate and get proper email if needed
         if ([string]::IsNullOrWhiteSpace($ownerEmail)) {
             Write-LogMessage -Message "Owner email is empty, prompting for input..." -Type Warning
             $ownerEmail = Read-Host "Enter the site owner email address"
@@ -102,109 +126,119 @@ function New-TenantSharePoint {
         Write-LogMessage -Message "Using Current User Email: '$currentUserEmail'" -Type Info
         Write-LogMessage -Message "SharePoint Admin URL: $adminUrl" -Type Info
         Write-LogMessage -Message "SharePoint Tenant URL: $tenantUrl" -Type Info
+        Write-LogMessage -Message "Hub Site (Root): $hubSiteUrl" -Type Info
         
-        # Connect to SharePoint Online Admin Center with modern authentication
-        Write-LogMessage -Message "Connecting to SharePoint Online Admin Center with modern authentication..." -Type Info
+        # Connect to SharePoint Online
+        Write-LogMessage -Message "Connecting to SharePoint Online Admin Center..." -Type Info
         try {
             Connect-SPOService -Url $adminUrl -ModernAuth $true
             Write-LogMessage -Message "Successfully connected to SharePoint Online" -Type Success
-        }
-        catch {
-            Write-LogMessage -Message "Failed to connect with modern auth, trying standard connection..." -Type Warning
-            Connect-SPOService -Url $adminUrl
-        }
-        
-        # Create a Hub Site
-        $hubSiteTitle = "$customerName Hub"
-        $hubSiteUrl = "$tenantUrl/sites/corporatehub"
-        
-        # Check if the Hub Site already exists, if not, create one
-        Write-LogMessage -Message "Creating hub site: $hubSiteUrl" -Type Info
-        try {
-            # Use more reliable method to check if site exists
-            $existingHubSite = $null
+            
             try {
-                $existingHubSite = Get-SPOSite -Identity $hubSiteUrl -ErrorAction Stop
-                Write-LogMessage -Message "Hub site already exists: $hubSiteUrl" -Type Warning
+                $tenantInfo = Get-SPOTenant -ErrorAction Stop
+                Write-LogMessage -Message "SharePoint Administrator permissions verified" -Type Success
             }
             catch {
-                # Site doesn't exist, proceed with creation
-                Write-LogMessage -Message "Creating new hub site..." -Type Info
-                New-SPOSite -Url $hubSiteUrl -Owner $ownerEmail -StorageQuota $SharePointConfig.StorageQuota -Title $hubSiteTitle -Template $SharePointConfig.SiteTemplate
-                Write-LogMessage -Message "Hub site created successfully: $hubSiteUrl" -Type Success
-                
-                # Wait for site to be fully provisioned
-                Write-LogMessage -Message "Waiting for hub site to be fully provisioned..." -Type Info
-                Start-Sleep -Seconds 60
+                Write-LogMessage -Message "WARNING: Connected but may not have SharePoint Administrator permissions" -Type Warning
             }
         }
         catch {
-            Write-LogMessage -Message "Error with hub site creation - $($_.Exception.Message)" -Type Error
+            Write-LogMessage -Message "Failed to connect - $($_.Exception.Message)" -Type Error
             return $false
         }
         
-        # IMPROVED Hub Site Registration with proper error handling
-        Write-LogMessage -Message "Registering site as Hub..." -Type Info
+        # Verify root site exists and get its information
+        Write-LogMessage -Message "Verifying root site for hub registration..." -Type Info
         try {
-            # Step 1: Check current hub site status
+            $rootSiteInfo = Get-SPOSite -Identity $hubSiteUrl -Detailed -ErrorAction Stop
+            Write-LogMessage -Message "Root site found - Title: '$($rootSiteInfo.Title)', Template: $($rootSiteInfo.Template)" -Type Success
+            
+            # Update root site title to reflect hub status
+            $hubSiteTitle = "$customerName Hub"
+            if ($rootSiteInfo.Title -ne $hubSiteTitle) {
+                try {
+                    Set-SPOSite -Identity $hubSiteUrl -Title $hubSiteTitle -ErrorAction Stop
+                    Write-LogMessage -Message "Root site title updated to: '$hubSiteTitle'" -Type Success
+                }
+                catch {
+                    Write-LogMessage -Message "Could not update root site title - $($_.Exception.Message)" -Type Warning
+                }
+            }
+        }
+        catch {
+            Write-LogMessage -Message "ERROR: Cannot access root site at $hubSiteUrl - $($_.Exception.Message)" -Type Error
+            return $false
+        }
+        
+        # Register root site as Hub Site
+        Write-LogMessage -Message "Registering root site as Hub..." -Type Info
+        try {
             $existingHubSites = Get-SPOHubSite -ErrorAction SilentlyContinue
             $isAlreadyHub = $existingHubSites | Where-Object { $_.SiteUrl -eq $hubSiteUrl }
             
             if ($isAlreadyHub) {
-                Write-LogMessage -Message "Site is already registered as a Hub site" -Type Warning
+                Write-LogMessage -Message "Root site is already registered as a Hub site" -Type Warning
                 $hubSiteId = $isAlreadyHub.ID
             }
             else {
-                # Step 2: Verify site exists and get detailed info
-                $siteInfo = Get-SPOSite -Identity $hubSiteUrl -Detailed -ErrorAction Stop
-                Write-LogMessage -Message "Site template: $($siteInfo.Template), Status: $($siteInfo.Status)" -Type Info
+                Write-LogMessage -Message "Root site template: $($rootSiteInfo.Template), Status: $($rootSiteInfo.Status)" -Type Info
                 
-                # Step 3: Check if site is associated with another hub
-                if ($siteInfo.HubSiteId -and $siteInfo.HubSiteId -ne "00000000-0000-0000-0000-000000000000") {
-                    Write-LogMessage -Message "Site is associated with another hub. Removing association first..." -Type Warning
+                # Check if root site is associated with another hub (unlikely but possible)
+                if ($rootSiteInfo.HubSiteId -and $rootSiteInfo.HubSiteId -ne "00000000-0000-0000-0000-000000000000") {
+                    Write-LogMessage -Message "Root site is associated with another hub. Removing association first..." -Type Warning
                     Remove-SPOHubSiteAssociation -Site $hubSiteUrl -ErrorAction Stop
                     Start-Sleep -Seconds 10
                 }
                 
-                # Step 4: Register as hub site using the method from research
-                Write-LogMessage -Message "Registering as hub site with null principals..." -Type Info
+                $registrationSuccess = $false
+                
+                # Try different registration approaches
                 try {
-                    # Use the exact method from research - pass $null for Principals
-                    Register-SPOHubSite -Site $hubSiteUrl -Principals $null
-                    Write-LogMessage -Message "Hub site registered successfully using null principals" -Type Success
+                    Register-SPOHubSite -Site $hubSiteUrl
+                    $registrationSuccess = $true
+                    Write-LogMessage -Message "Root site registered as hub successfully (no principals)" -Type Success
                 }
                 catch {
-                    # Fallback: Try with owner email if null fails
-                    if ($_.Exception.Message -like "*Cannot bind argument to parameter 'Principals'*") {
-                        Write-LogMessage -Message "Null principals failed, trying with owner email..." -Type Warning
-                        Register-SPOHubSite -Site $hubSiteUrl -Principals @($ownerEmail)
-                        Write-LogMessage -Message "Hub site registered successfully with owner email" -Type Success
+                    try {
+                        Register-SPOHubSite -Site $hubSiteUrl -Principals @()
+                        $registrationSuccess = $true
+                        Write-LogMessage -Message "Root site registered as hub successfully (empty array)" -Type Success
                     }
-                    else {
-                        throw $_
+                    catch {
+                        try {
+                            Register-SPOHubSite -Site $hubSiteUrl -Principals $ownerEmail
+                            $registrationSuccess = $true
+                            Write-LogMessage -Message "Root site registered as hub successfully (with owner)" -Type Success
+                        }
+                        catch {
+                            Write-LogMessage -Message "All hub registration approaches failed: $($_.Exception.Message)" -Type Error
+                        }
                     }
                 }
                 
-                # Step 5: Verify registration was successful
-                Start-Sleep -Seconds 15
-                $verifyHub = Get-SPOHubSite | Where-Object { $_.SiteUrl -eq $hubSiteUrl }
-                if ($verifyHub) {
-                    Write-LogMessage -Message "Hub site registration verified successfully" -Type Success
-                    $hubSiteId = $verifyHub.ID
+                if ($registrationSuccess) {
+                    Start-Sleep -Seconds 15
+                    $verifyHub = Get-SPOHubSite | Where-Object { $_.SiteUrl -eq $hubSiteUrl }
+                    if ($verifyHub) {
+                        Write-LogMessage -Message "Root site hub registration verified successfully" -Type Success
+                        $hubSiteId = $verifyHub.ID
+                    }
+                    else {
+                        Write-LogMessage -Message "Root site hub registration verification failed" -Type Error
+                        $hubSiteId = $null
+                    }
                 }
                 else {
-                    Write-LogMessage -Message "Hub site registration verification failed" -Type Error
                     $hubSiteId = $null
                 }
             }
         }
         catch {
-            Write-LogMessage -Message "Hub site registration failed - $($_.Exception.Message)" -Type Error
-            Write-LogMessage -Message "Continuing without hub site functionality..." -Type Warning
+            Write-LogMessage -Message "Root site hub registration failed - $($_.Exception.Message)" -Type Error
             $hubSiteId = $null
         }
         
-        # Create spokes sites array
+        # Create spoke sites configuration
         $spokeSites = @()
         foreach ($siteName in $SharePointConfig.DefaultSites) {
             $spokeSites += @{ 
@@ -213,24 +247,16 @@ function New-TenantSharePoint {
             }
         }
         
-        # Create security groups for each site with progress tracking
+        # Create security groups for spoke sites
         $securityGroups = @{}
-        $totalGroups = $spokeSites.Count * 3 # 3 groups per site (Members, Owners, Visitors)
-        $currentGroup = 0
-        
-        Write-Progress -Id 1 -Activity "Creating Security Groups" -Status "Starting group creation..." -PercentComplete 0
+        Write-LogMessage -Message "Creating security groups for spoke sites..." -Type Info
         
         foreach ($site in $spokeSites) {
             $siteName = $site.Name
             Write-LogMessage -Message "Creating security groups for site: $siteName" -Type Info
             
             foreach ($groupType in @("Members", "Owners", "Visitors")) {
-                $currentGroup++
-                $percentComplete = [math]::Round(($currentGroup / $totalGroups) * 100, 2)
-                
                 $groupName = "$siteName SharePoint $groupType"
-                Write-Progress -Id 1 -Activity "Creating Security Groups" -Status "Creating: $groupName" -PercentComplete $percentComplete -CurrentOperation "Group $currentGroup of $totalGroups"
-                
                 $existingGroup = Get-MgGroup -Filter "DisplayName eq '$groupName'" -ErrorAction SilentlyContinue
                 
                 if ($existingGroup -eq $null) {
@@ -249,37 +275,18 @@ function New-TenantSharePoint {
             }
         }
         
-        # Complete security groups progress
-        Write-Progress -Id 1 -Activity "Creating Security Groups" -Completed
-        
-        # Wait for security groups to propagate
+        # Wait for group propagation
         Write-LogMessage -Message "Waiting for security groups to propagate (2 minutes)..." -Type Info
-        $propagationTime = 120
-        for ($i = 1; $i -le $propagationTime; $i++) {
-            $percentComplete = [math]::Round(($i / $propagationTime) * 100, 2)
-            $remaining = $propagationTime - $i
-            Write-Progress -Id 2 -Activity "Group Propagation" -Status "Waiting for Azure AD synchronization..." -PercentComplete $percentComplete -SecondsRemaining $remaining
-            Start-Sleep -Seconds 1
-        }
-        Write-Progress -Id 2 -Activity "Group Propagation" -Completed
+        Start-Sleep -Seconds 120
         
-        # Create spoke sites with progress tracking
-        $totalSites = $spokeSites.Count
-        $currentSite = 0
+        # Create spoke sites
         $createdSites = @()
-        
-        Write-Progress -Id 3 -Activity "Creating SharePoint Sites" -Status "Starting site creation..." -PercentComplete 0
+        Write-LogMessage -Message "Creating spoke sites..." -Type Info
         
         foreach ($site in $spokeSites) {
-            $currentSite++
-            $percentComplete = [math]::Round(($currentSite / $totalSites) * 100, 2)
-            
             $siteUrl = $site.URL
             $siteName = $site.Name
             
-            Write-Progress -Id 3 -Activity "Creating SharePoint Sites" -Status "Creating: $siteName" -PercentComplete $percentComplete -CurrentOperation "Site $currentSite of $totalSites"
-            
-            # Check if the Spoke Site already exists, if not, create one
             try {
                 $existingSpokeSite = $null
                 try {
@@ -288,7 +295,6 @@ function New-TenantSharePoint {
                     $createdSites += $siteUrl
                 }
                 catch {
-                    # Site doesn't exist, create it
                     Write-LogMessage -Message "Creating $siteName site..." -Type Info
                     New-SPOSite -Url $siteUrl -Owner $ownerEmail -StorageQuota $SharePointConfig.StorageQuota -Title "$siteName" -Template $SharePointConfig.SiteTemplate
                     Write-LogMessage -Message "$siteName site created: $siteUrl" -Type Success
@@ -301,109 +307,144 @@ function New-TenantSharePoint {
             }
         }
         
-        # Complete site creation progress
-        Write-Progress -Id 3 -Activity "Creating SharePoint Sites" -Completed
-        
-        # Wait for sites to provision
+        # Wait for site provisioning
         Write-LogMessage -Message "Waiting for SharePoint sites to provision (3 minutes)..." -Type Info
-        $provisionTime = 180
-        for ($i = 1; $i -le $provisionTime; $i++) {
-            $percentComplete = [math]::Round(($i / $provisionTime) * 100, 2)
-            $remaining = $provisionTime - $i
-            Write-Progress -Id 4 -Activity "Site Provisioning" -Status "Waiting for SharePoint sites to fully provision..." -PercentComplete $percentComplete -SecondsRemaining $remaining
-            Start-Sleep -Seconds 1
-        }
-        Write-Progress -Id 4 -Activity "Site Provisioning" -Completed
+        Start-Sleep -Seconds 180
         
-        # Associate sites with hub (only if hub was registered successfully)
+        # Associate spoke sites with root hub
         if ($hubSiteId) {
-            Write-LogMessage -Message "Associating sites with hub..." -Type Info
-            $totalAssociations = $createdSites.Count
-            $currentAssociation = 0
-            
-            Write-Progress -Id 5 -Activity "Hub Site Associations" -Status "Starting hub associations..." -PercentComplete 0
-            
+            Write-LogMessage -Message "Associating spoke sites with root hub..." -Type Info
             foreach ($siteUrl in $createdSites) {
-                $currentAssociation++
-                $percentComplete = [math]::Round(($currentAssociation / $totalAssociations) * 100, 2)
-                $siteName = ($spokeSites | Where-Object { $_.URL -eq $siteUrl }).Name
-                
-                Write-Progress -Id 5 -Activity "Hub Site Associations" -Status "Associating: $siteName" -PercentComplete $percentComplete -CurrentOperation "Association $currentAssociation of $totalAssociations"
-                
                 try {
-                    # Check if site is already associated
                     $siteInfo = Get-SPOSite -Identity $siteUrl -Detailed
                     if ($siteInfo.HubSiteId -eq $hubSiteId) {
-                        Write-LogMessage -Message "$siteName already associated with hub" -Type Warning
-                    }
-                    elseif ($siteInfo.HubSiteId -and $siteInfo.HubSiteId -ne "00000000-0000-0000-0000-000000000000") {
-                        Write-LogMessage -Message "$siteName is associated with different hub, removing first..." -Type Warning
-                        Remove-SPOHubSiteAssociation -Site $siteUrl
-                        Start-Sleep -Seconds 5
-                        Add-SPOHubSiteAssociation -Site $siteUrl -HubSite $hubSiteUrl
-                        Write-LogMessage -Message "$siteName re-associated with hub" -Type Success
+                        $siteName = ($spokeSites | Where-Object { $_.URL -eq $siteUrl }).Name
+                        Write-LogMessage -Message "$siteName already associated with root hub" -Type Warning
                     }
                     else {
                         Add-SPOHubSiteAssociation -Site $siteUrl -HubSite $hubSiteUrl
-                        Write-LogMessage -Message "$siteName associated with hub" -Type Success
+                        $siteName = ($spokeSites | Where-Object { $_.URL -eq $siteUrl }).Name
+                        Write-LogMessage -Message "$siteName associated with root hub" -Type Success
                     }
                 }
                 catch {
-                    if ($_.Exception.Message -like "*already associated*") {
-                        Write-LogMessage -Message "$siteName already associated with hub" -Type Warning
+                    $siteName = ($spokeSites | Where-Object { $_.URL -eq $siteUrl }).Name
+                    Write-LogMessage -Message "Failed to associate $siteName with root hub - $($_.Exception.Message)" -Type Warning
+                }
+                Start-Sleep -Seconds 2
+            }
+        }
+        
+        # Set site collection administrators for spoke sites
+        Write-LogMessage -Message "Configuring spoke site permissions..." -Type Info
+        foreach ($siteUrl in $createdSites) {
+            try {
+                Set-SPOUser -Site $siteUrl -LoginName $ownerEmail -IsSiteCollectionAdmin $true -ErrorAction Stop
+                if ($currentUserEmail -ne $ownerEmail) {
+                    Set-SPOUser -Site $siteUrl -LoginName $currentUserEmail -IsSiteCollectionAdmin $true -ErrorAction Stop
+                }
+                $siteName = ($spokeSites | Where-Object { $_.URL -eq $siteUrl }).Name
+                Write-LogMessage -Message "Set site collection admins for $siteName" -Type Success
+            }
+            catch {
+                $siteName = ($spokeSites | Where-Object { $_.URL -eq $siteUrl }).Name
+                Write-LogMessage -Message "Failed to set site collection admin for $siteName - $($_.Exception.Message)" -Type Warning
+            }
+        }
+        
+        # Configure root site permissions
+        Write-LogMessage -Message "Configuring root hub site permissions..." -Type Info
+        try {
+            Set-SPOUser -Site $hubSiteUrl -LoginName $ownerEmail -IsSiteCollectionAdmin $true -ErrorAction Stop
+            if ($currentUserEmail -ne $ownerEmail) {
+                Set-SPOUser -Site $hubSiteUrl -LoginName $currentUserEmail -IsSiteCollectionAdmin $true -ErrorAction Stop
+            }
+            Write-LogMessage -Message "Set site collection admins for root hub site" -Type Success
+        }
+        catch {
+            Write-LogMessage -Message "Failed to set site collection admin for root hub - $($_.Exception.Message)" -Type Warning
+        }
+        
+        # AUTOMATED SECURITY GROUP ASSIGNMENT using PnP PowerShell
+        if ($pnpAvailable) {
+            Write-LogMessage -Message "Starting automated security group assignment using PnP PowerShell..." -Type Info
+            $groupAssignmentSuccess = $true
+            
+            foreach ($site in $spokeSites) {
+                $siteUrl = $site.URL
+                $siteName = $site.Name
+                
+                Write-LogMessage -Message "Configuring security groups for $siteName..." -Type Info
+                
+                try {
+                    # Connect to the specific site with PnP
+                    Connect-PnPOnline -Url $siteUrl -Interactive -ErrorAction Stop
+                    Write-LogMessage -Message "Connected to $siteName with PnP PowerShell" -Type Success
+                    
+                    foreach ($groupType in @("Members", "Owners", "Visitors")) {
+                        $groupKey = "$siteName-$groupType"
+                        $groupDisplayName = "$siteName SharePoint $groupType"
+                        $sharePointGroupName = "$siteName $groupType"
+                        
+                        if ($securityGroups.ContainsKey($groupKey)) {
+                            try {
+                                # Add Azure AD security group to SharePoint group
+                                Add-PnPUser -LoginName $groupDisplayName -Group $sharePointGroupName -ErrorAction Stop
+                                Write-LogMessage -Message "Added '$groupDisplayName' to $siteName $sharePointGroupName" -Type Success
+                            }
+                            catch {
+                                if ($_.Exception.Message -like "*already exists*" -or $_.Exception.Message -like "*already a member*") {
+                                    Write-LogMessage -Message "'$groupDisplayName' already exists in $siteName $sharePointGroupName" -Type Warning
+                                }
+                                else {
+                                    Write-LogMessage -Message "Failed to add '$groupDisplayName' to $siteName: $($_.Exception.Message)" -Type Warning
+                                    $groupAssignmentSuccess = $false
+                                }
+                            }
+                        }
                     }
-                    else {
-                        Write-LogMessage -Message "Failed to associate $siteName with hub - $($_.Exception.Message)" -Type Warning
-                    }
+                    
+                    # Disconnect from this site
+                    Disconnect-PnPOnline
+                    
+                }
+                catch {
+                    Write-LogMessage -Message "Failed to connect to $siteName with PnP PowerShell: $($_.Exception.Message)" -Type Error
+                    $groupAssignmentSuccess = $false
                 }
                 
-                # Small delay to prevent throttling
                 Start-Sleep -Seconds 2
             }
             
-            Write-Progress -Id 5 -Activity "Hub Site Associations" -Completed
+            if ($groupAssignmentSuccess) {
+                Write-LogMessage -Message "Automated security group assignment completed successfully!" -Type Success
+            }
+            else {
+                Write-LogMessage -Message "Some security group assignments failed - manual configuration may be needed" -Type Warning
+            }
         }
         else {
-            Write-LogMessage -Message "Skipping hub associations - hub site not registered" -Type Warning
+            Write-LogMessage -Message "PnP PowerShell not available - security groups created but not assigned to sites" -Type Warning
         }
         
-        # Configure site permissions (simplified approach)
-        Write-LogMessage -Message "Configuring basic site permissions..." -Type Info
+        # Final results and guidance
+        Write-LogMessage -Message "SharePoint configuration completed!" -Type Success
+        Write-LogMessage -Message "Root Hub Site: '$customerName Hub' at $hubSiteUrl" -Type Info
         
-        # Set current user as site collection admin for all sites
-        $currentUserEmail = $context.Account
-        
+        Write-LogMessage -Message "Spoke site URLs created:" -Type Info
         foreach ($siteUrl in $createdSites) {
-            try {
-                # Ensure both owner and current user have site collection admin rights
-                Set-SPOUser -Site $siteUrl -LoginName $ownerEmail -IsSiteCollectionAdmin $true
-                if ($currentUserEmail -ne $ownerEmail) {
-                    Set-SPOUser -Site $siteUrl -LoginName $currentUserEmail -IsSiteCollectionAdmin $true
-                }
-                Write-LogMessage -Message "Set site collection admins for $siteUrl" -Type Success
-            }
-            catch {
-                Write-LogMessage -Message "Failed to set site collection admin for $siteUrl - $($_.Exception.Message)" -Type Warning
-            }
+            $siteName = ($spokeSites | Where-Object { $_.URL -eq $siteUrl }).Name
+            Write-LogMessage -Message "   $siteName: $siteUrl" -Type Info
         }
         
-        # Provide guidance for manual security group configuration
-        Write-LogMessage -Message "SharePoint sites created successfully!" -Type Success
-        Write-LogMessage -Message "Manual security group configuration may be needed:" -Type Info
-        Write-LogMessage -Message "1. SharePoint Admin Center: https://$tenantName-admin.sharepoint.com" -Type Info
-        Write-LogMessage -Message "2. For each site, go to Permissions and add the corresponding security groups:" -Type Info
-        
-        foreach ($site in $spokeSites) {
-            $siteName = $site.Name
-            Write-LogMessage -Message "   $siteName site: Add '$siteName SharePoint Members/Owners/Visitors' groups" -Type Info
+        if (-not $pnpAvailable -or -not $groupAssignmentSuccess) {
+            Write-LogMessage -Message "Manual security group configuration options:" -Type Info
+            Write-LogMessage -Message "1. SharePoint Admin Center: https://$tenantName-admin.sharepoint.com" -Type Info
+            Write-LogMessage -Message "2. Install PnP PowerShell: Install-Module PnP.PowerShell -Scope CurrentUser" -Type Info
+            Write-LogMessage -Message "3. For each site, add the corresponding security groups to SharePoint groups" -Type Info
         }
         
-        Write-LogMessage -Message "3. Alternative: Use PnP PowerShell for automated group assignment" -Type Info
-        Write-LogMessage -Message "   Install-Module PnP.PowerShell -Scope CurrentUser" -Type Info
-        Write-LogMessage -Message "   Connect-PnPOnline [SiteURL] -Interactive" -Type Info
-        Write-LogMessage -Message "   Add-PnPGroupMember -LoginName '[GroupName]' -Identity 'Site Members'" -Type Info
-        
-        Write-LogMessage -Message "SharePoint configuration completed successfully" -Type Success
+        Write-LogMessage -Message "Navigation and search integration will be available from the root site hub" -Type Info
         
         # Clean disconnect
         try {
@@ -417,14 +458,6 @@ function New-TenantSharePoint {
     }
     catch {
         Write-LogMessage -Message "Error in SharePoint configuration - $($_.Exception.Message)" -Type Error
-        
-        # Clean up any progress bars on error
-        Write-Progress -Id 1 -Activity "Creating Security Groups" -Completed
-        Write-Progress -Id 2 -Activity "Group Propagation" -Completed
-        Write-Progress -Id 3 -Activity "Creating SharePoint Sites" -Completed
-        Write-Progress -Id 4 -Activity "Site Provisioning" -Completed
-        Write-Progress -Id 5 -Activity "Hub Site Associations" -Completed
-        
         return $false
     }
 }
