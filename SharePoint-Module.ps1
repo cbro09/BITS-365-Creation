@@ -433,7 +433,7 @@ function New-TenantSharePoint {
             Write-LogMessage -Message "Failed to set site collection admin for root hub - $($_.Exception.Message)" -Type Warning
         }
         
-        # AUTOMATED SECURITY GROUP ASSIGNMENT using PnP PowerShell
+        # AUTOMATED SECURITY GROUP ASSIGNMENT
         $groupAssignmentSuccess = $true
         $fallbackSuccess = $true
         
@@ -547,9 +547,9 @@ function New-TenantSharePoint {
         
         # Show creation summary and security groups status
         Write-LogMessage -Message "Configuration Summary" -Type Info
-        Write-LogMessage -Message "  New Security Groups Created: $newGroupsCreated" -Type Info
-        Write-LogMessage -Message "  New Sites Created: $newSitesCreated" -Type Info
-        Write-LogMessage -Message "  Total Sites Configured: $($createdSites.Count)" -Type Info
+        Write-LogMessage -Message "  New Security Groups Created - $newGroupsCreated" -Type Info
+        Write-LogMessage -Message "  New Sites Created - $newSitesCreated" -Type Info
+        Write-LogMessage -Message "  Total Sites Configured - $($createdSites.Count)" -Type Info
         
         # Show security groups status
         if ($securityGroups.Count -gt 0) {
@@ -561,7 +561,7 @@ function New-TenantSharePoint {
                     $groupKey = "$siteName-$groupType"
                     if ($securityGroups.ContainsKey($groupKey)) {
                         $groupDisplayName = "$siteName SharePoint $groupType"
-                        Write-LogMessage -Message "    ✓ $groupDisplayName" -Type Info
+                        Write-LogMessage -Message "    OK $groupDisplayName" -Type Info
                     }
                 }
             }
@@ -586,7 +586,7 @@ function New-TenantSharePoint {
             Write-LogMessage -Message "Manual security group configuration required" -Type Warning
             Write-LogMessage -Message "Method 1 - SharePoint Admin Center" -Type Info
             Write-LogMessage -Message "  1. Go to https://$tenantName-admin.sharepoint.com" -Type Info
-            Write-LogMessage -Message "  2. Select Active Sites > Choose a site > Permissions" -Type Info
+            Write-LogMessage -Message "  2. Select Active Sites then Choose a site then Permissions" -Type Info
             Write-LogMessage -Message "  3. Add the security groups listed above to appropriate SharePoint groups" -Type Info
             Write-LogMessage -Message "Method 2 - Install PnP PowerShell and re-run" -Type Info
             Write-LogMessage -Message "  Install-Module PnP.PowerShell -Scope CurrentUser -Force" -Type Info
