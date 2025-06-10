@@ -262,14 +262,30 @@ function New-TenantSharePoint {
             }
         }
         
-        # Create security groups for spoke sites
+        # Add root hub site to sites that need security groups
+        $allSites = @()
+        $allSites += @{ 
+            Name = "Hub"
+            URL = $hubSiteUrl
+            IsHub = $true
+        }
+        foreach ($site in $spokeSites) {
+            $allSites += @{
+                Name = $site.Name
+                URL = $site.URL
+                IsHub = $false
+            }
+        }
+        
+        # Create security groups for ALL sites (including hub)
         $securityGroups = @{}
         $newGroupsCreated = 0
-        Write-LogMessage -Message "Creating security groups for spoke sites..." -Type Info
+        Write-LogMessage -Message "Creating security groups for all sites (including hub)..." -Type Info
         
-        foreach ($site in $spokeSites) {
+        foreach ($site in $allSites) {
             $siteName = $site.Name
-            Write-LogMessage -Message "Creating security groups for site $siteName" -Type Info
+            $siteDisplayName = if ($site.IsHub) { "$customerName Hub" } else { $siteName }
+            Write-LogMessage -Message "Creating security groups for $siteDisplayName..." -Type Info
             
             foreach ($groupType in @("Members", "Owners", "Visitors")) {
                 $groupName = "$siteName SharePoint $groupType"
@@ -401,10 +417,60 @@ function New-TenantSharePoint {
                 }
                 Start-Sleep -Seconds 2
             }
+            
+            # Configure Hub Navigation with links to all spoke sites
+            Write-LogMessage -Message "Configuring hub navigation with spoke site links..." -Type Info
+            try {
+                # Build navigation menu items
+                $navigationItems = @()
+                foreach ($site in $spokeSites) {
+                    $siteUrl = $site.URL
+                    $siteName = $site.Name
+                    
+                    # Check if site was actually created/exists
+                    if ($createdSites -contains $siteUrl) {
+                        $navigationItems += @{
+                            "displayName" = $siteName
+                            "url" = $siteUrl
+                        }
+                    }
+                }
+                
+                if ($navigationItems.Count -gt 0) {
+                    # Convert to JSON format required by SharePoint
+                    $navigationJson = $navigationItems | ConvertTo-Json -Depth 3
+                    
+                    # Set the hub navigation
+                    Set-SPOHubSite -Identity $hubSiteUrl -MenuConfiguration $navigationJson
+                    Write-LogMessage -Message "Hub navigation configured with $($navigationItems.Count) spoke site links" -Type Success
+                    Write-LogMessage -Message "Navigation items: $($navigationItems.displayName -join ', ')" -Type Info
+                }
+                else {
+                    Write-LogMessage -Message "No spoke sites available for navigation configuration" -Type Warning
+                }
+            }
+            catch {
+                Write-LogMessage -Message "Failed to configure hub navigation - $($_.Exception.Message)" -Type Warning
+                Write-LogMessage -Message "Navigation can be configured manually in SharePoint Admin Center" -Type Info
+            }
         }
         
-        # Set site collection administrators for spoke sites
-        Write-LogMessage -Message "Configuring spoke site permissions..." -Type Info
+        # Set site collection administrators for all sites (including hub)
+        Write-LogMessage -Message "Configuring site permissions for all sites..." -Type Info
+        
+        # Configure hub site permissions first
+        try {
+            Set-SPOUser -Site $hubSiteUrl -LoginName $ownerEmail -IsSiteCollectionAdmin $true -ErrorAction Stop
+            if ($currentUserEmail -ne $ownerEmail) {
+                Set-SPOUser -Site $hubSiteUrl -LoginName $currentUserEmail -IsSiteCollectionAdmin $true -ErrorAction Stop
+            }
+            Write-LogMessage -Message "Set site collection admins for root hub site" -Type Success
+        }
+        catch {
+            Write-LogMessage -Message "Failed to set site collection admin for root hub - $($_.Exception.Message)" -Type Warning
+        }
+        
+        # Configure spoke site permissions
         foreach ($siteUrl in $createdSites) {
             try {
                 Set-SPOUser -Site $siteUrl -LoginName $ownerEmail -IsSiteCollectionAdmin $true -ErrorAction Stop
@@ -420,19 +486,6 @@ function New-TenantSharePoint {
             }
         }
         
-        # Configure root site permissions
-        Write-LogMessage -Message "Configuring root hub site permissions..." -Type Info
-        try {
-            Set-SPOUser -Site $hubSiteUrl -LoginName $ownerEmail -IsSiteCollectionAdmin $true -ErrorAction Stop
-            if ($currentUserEmail -ne $ownerEmail) {
-                Set-SPOUser -Site $hubSiteUrl -LoginName $currentUserEmail -IsSiteCollectionAdmin $true -ErrorAction Stop
-            }
-            Write-LogMessage -Message "Set site collection admins for root hub site" -Type Success
-        }
-        catch {
-            Write-LogMessage -Message "Failed to set site collection admin for root hub - $($_.Exception.Message)" -Type Warning
-        }
-        
         # AUTOMATED SECURITY GROUP ASSIGNMENT
         $groupAssignmentSuccess = $true
         $fallbackSuccess = $true
@@ -440,51 +493,94 @@ function New-TenantSharePoint {
         if ($pnpAvailable) {
             Write-LogMessage -Message "Starting automated security group assignment using PnP PowerShell..." -Type Info
             
+            # Configure security groups for hub site first
+            Write-LogMessage -Message "Configuring security groups for Hub site..." -Type Info
+            try {
+                Connect-PnPOnline -Url $hubSiteUrl -Interactive -ErrorAction Stop
+                Write-LogMessage -Message "Connected to Hub site with PnP PowerShell" -Type Success
+                
+                foreach ($groupType in @("Members", "Owners", "Visitors")) {
+                    $groupKey = "Hub-$groupType"
+                    $groupDisplayName = "Hub SharePoint $groupType"
+                    $sharePointGroupName = "$customerName Hub $groupType"
+                    
+                    if ($securityGroups.ContainsKey($groupKey)) {
+                        try {
+                            # Add Azure AD security group to SharePoint group
+                            Add-PnPUser -LoginName $groupDisplayName -Group $sharePointGroupName -ErrorAction Stop
+                            Write-LogMessage -Message "Added '$groupDisplayName' to Hub $sharePointGroupName" -Type Success
+                        }
+                        catch {
+                            if ($_.Exception.Message -like "*already exists*" -or $_.Exception.Message -like "*already a member*") {
+                                Write-LogMessage -Message "'$groupDisplayName' already exists in Hub $sharePointGroupName" -Type Warning
+                            }
+                            else {
+                                $errorMsg = "Failed to add '$groupDisplayName' to Hub - $($_.Exception.Message)"
+                                Write-LogMessage -Message $errorMsg -Type Warning
+                                $groupAssignmentSuccess = $false
+                            }
+                        }
+                    }
+                }
+                
+                # Disconnect from hub site
+                Disconnect-PnPOnline
+                
+            }
+            catch {
+                Write-LogMessage -Message "Failed to connect to Hub site with PnP PowerShell - $($_.Exception.Message)" -Type Error
+                $groupAssignmentSuccess = $false
+            }
+            
+            # Configure security groups for spoke sites
             foreach ($site in $spokeSites) {
                 $siteUrl = $site.URL
                 $siteName = $site.Name
                 
-                Write-LogMessage -Message "Configuring security groups for $siteName..." -Type Info
-                
-                try {
-                    # Connect to the specific site with PnP
-                    Connect-PnPOnline -Url $siteUrl -Interactive -ErrorAction Stop
-                    Write-LogMessage -Message "Connected to $siteName with PnP PowerShell" -Type Success
+                # Only process sites that were actually created
+                if ($createdSites -contains $siteUrl) {
+                    Write-LogMessage -Message "Configuring security groups for $siteName..." -Type Info
                     
-                    foreach ($groupType in @("Members", "Owners", "Visitors")) {
-                        $groupKey = "$siteName-$groupType"
-                        $groupDisplayName = "$siteName SharePoint $groupType"
-                        $sharePointGroupName = "$siteName $groupType"
+                    try {
+                        # Connect to the specific site with PnP
+                        Connect-PnPOnline -Url $siteUrl -Interactive -ErrorAction Stop
+                        Write-LogMessage -Message "Connected to $siteName with PnP PowerShell" -Type Success
                         
-                        if ($securityGroups.ContainsKey($groupKey)) {
-                            try {
-                                # Add Azure AD security group to SharePoint group
-                                Add-PnPUser -LoginName $groupDisplayName -Group $sharePointGroupName -ErrorAction Stop
-                                Write-LogMessage -Message "Added '$groupDisplayName' to $siteName $sharePointGroupName" -Type Success
-                            }
-                            catch {
-                                if ($_.Exception.Message -like "*already exists*" -or $_.Exception.Message -like "*already a member*") {
-                                    Write-LogMessage -Message "'$groupDisplayName' already exists in $siteName $sharePointGroupName" -Type Warning
+                        foreach ($groupType in @("Members", "Owners", "Visitors")) {
+                            $groupKey = "$siteName-$groupType"
+                            $groupDisplayName = "$siteName SharePoint $groupType"
+                            $sharePointGroupName = "$siteName $groupType"
+                            
+                            if ($securityGroups.ContainsKey($groupKey)) {
+                                try {
+                                    # Add Azure AD security group to SharePoint group
+                                    Add-PnPUser -LoginName $groupDisplayName -Group $sharePointGroupName -ErrorAction Stop
+                                    Write-LogMessage -Message "Added '$groupDisplayName' to $siteName $sharePointGroupName" -Type Success
                                 }
-                                else {
-                                    $errorMsg = "Failed to add '$groupDisplayName' to $siteName - $($_.Exception.Message)"
-                                    Write-LogMessage -Message $errorMsg -Type Warning
-                                    $groupAssignmentSuccess = $false
+                                catch {
+                                    if ($_.Exception.Message -like "*already exists*" -or $_.Exception.Message -like "*already a member*") {
+                                        Write-LogMessage -Message "'$groupDisplayName' already exists in $siteName $sharePointGroupName" -Type Warning
+                                    }
+                                    else {
+                                        $errorMsg = "Failed to add '$groupDisplayName' to $siteName - $($_.Exception.Message)"
+                                        Write-LogMessage -Message $errorMsg -Type Warning
+                                        $groupAssignmentSuccess = $false
+                                    }
                                 }
                             }
                         }
+                        
+                        # Disconnect from this site
+                        Disconnect-PnPOnline
+                        
+                    }
+                    catch {
+                        Write-LogMessage -Message "Failed to connect to $siteName with PnP PowerShell - $($_.Exception.Message)" -Type Error
+                        $groupAssignmentSuccess = $false
                     }
                     
-                    # Disconnect from this site
-                    Disconnect-PnPOnline
-                    
+                    Start-Sleep -Seconds 2
                 }
-                catch {
-                    Write-LogMessage -Message "Failed to connect to $siteName with PnP PowerShell - $($_.Exception.Message)" -Type Error
-                    $groupAssignmentSuccess = $false
-                }
-                
-                Start-Sleep -Seconds 2
             }
             
             if ($groupAssignmentSuccess) {
@@ -554,14 +650,28 @@ function New-TenantSharePoint {
         # Show security groups status
         if ($securityGroups.Count -gt 0) {
             Write-LogMessage -Message "Security Groups Available for Assignment" -Type Info
+            
+            # Show hub site groups
+            Write-LogMessage -Message "  Hub Site Groups" -Type Info
+            foreach ($groupType in @("Members", "Owners", "Visitors")) {
+                $groupKey = "Hub-$groupType"
+                if ($securityGroups.ContainsKey($groupKey)) {
+                    $groupDisplayName = "Hub SharePoint $groupType"
+                    Write-LogMessage -Message "    OK $groupDisplayName" -Type Info
+                }
+            }
+            
+            # Show spoke site groups
             foreach ($site in $spokeSites) {
                 $siteName = $site.Name
-                Write-LogMessage -Message "  $siteName Site Groups" -Type Info
-                foreach ($groupType in @("Members", "Owners", "Visitors")) {
-                    $groupKey = "$siteName-$groupType"
-                    if ($securityGroups.ContainsKey($groupKey)) {
-                        $groupDisplayName = "$siteName SharePoint $groupType"
-                        Write-LogMessage -Message "    OK $groupDisplayName" -Type Info
+                if ($createdSites -contains $site.URL) {
+                    Write-LogMessage -Message "  $siteName Site Groups" -Type Info
+                    foreach ($groupType in @("Members", "Owners", "Visitors")) {
+                        $groupKey = "$siteName-$groupType"
+                        if ($securityGroups.ContainsKey($groupKey)) {
+                            $groupDisplayName = "$siteName SharePoint $groupType"
+                            Write-LogMessage -Message "    OK $groupDisplayName" -Type Info
+                        }
                     }
                 }
             }
@@ -595,7 +705,8 @@ function New-TenantSharePoint {
             Write-LogMessage -Message "Security group assignment completed successfully!" -Type Success
         }
         
-        Write-LogMessage -Message "Navigation and search integration will be available from the root site hub" -Type Info
+        Write-LogMessage -Message "Navigation links to spoke sites have been configured in the hub navigation menu" -Type Info
+        Write-LogMessage -Message "Users can access all sites directly from the hub site navigation bar" -Type Info
         
         # Clean disconnect
         try {
