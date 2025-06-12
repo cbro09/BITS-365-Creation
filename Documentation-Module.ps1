@@ -222,7 +222,7 @@ function New-PopulatedExcelDocumentation {
         Update-ConditionalAccessSheet -Excel $excel -TenantData $TenantData
         
         # Save and close
-        Close-ExcelPackage -ExcelPackage $excel -Save
+        Close-ExcelPackage -ExcelPackage $excel -SaveAs $outputPath
         
         Write-LogMessage -Message "Populated Excel documentation generated: $outputPath" -Type Success
         return $true
