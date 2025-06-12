@@ -1340,7 +1340,3 @@ For detailed information, see the HTML and Excel reports in the Reports folder.
         return $false
     }
 }
-
-# === Export Functions ===
-# Make sure the main function is available for calling
-Export-ModuleMember -Function New-TenantDocumentation
