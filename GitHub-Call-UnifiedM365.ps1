@@ -714,21 +714,40 @@ function Start-Setup {
                 Read-Host "Press Enter to continue"
             }
             7 {
-                # Generate documentation
-                if (-not $script:TenantState) {
-                    Write-LogMessage -Message "No tenant configuration found. Please connect and configure tenant first." -Type Warning
+    # Generate documentation
+    if (-not $script:TenantState) {
+        Write-LogMessage -Message "No tenant configuration found. Please connect and configure tenant first." -Type Warning
+    }
+    else {
+        $moduleLoaded = Import-ModuleFromCache -ModuleName "Documentation"
+        if ($moduleLoaded) {
+            Write-LogMessage -Message "Executing Documentation module directly..." -Type Info
+            try {
+                $fileName = $GitHubConfig.ModuleFiles["Documentation"]
+                $localPath = Join-Path -Path $GitHubConfig.CacheDirectory -ChildPath $fileName
+                
+                $result = & {
+                    . $localPath
+                    New-TenantDocumentation
+                }
+                
+                if ($result) {
+                    Write-LogMessage -Message "Documentation completed successfully" -Type Success
                 }
                 else {
-                    $moduleLoaded = Import-ModuleFromCache -ModuleName "Documentation"
-                    if ($moduleLoaded) {
-                        $docGenerated = New-TenantDocumentation
-                    }
-                    else {
-                        Write-LogMessage -Message "Failed to load Documentation module. Please check your internet connection." -Type Error
-                    }
+                    Write-LogMessage -Message "Documentation returned false - check logs for details" -Type Warning
                 }
-                Read-Host "Press Enter to continue"
             }
+            catch {
+                Write-LogMessage -Message "Documentation failed: $($_.Exception.Message)" -Type Error
+            }
+        }
+        else {
+            Write-LogMessage -Message "Failed to load Documentation module. Please check your internet connection." -Type Error
+        }
+    }
+    Read-Host "Press Enter to continue"
+}
             8 {
                 # Debug Excel file
                 $moduleLoaded = Import-ModuleFromCache -ModuleName "Users"
