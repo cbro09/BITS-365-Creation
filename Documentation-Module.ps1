@@ -295,7 +295,7 @@ function Update-UsersSheet {
 function Update-LicensingSheet {
     <#
     .SYNOPSIS
-        Populates the Licensing sheet with user license assignments
+        Populates the Licensing sheet with user license assignments (licensed users only)
     #>
     param (
         [Parameter(Mandatory = $true)]
@@ -315,46 +315,53 @@ function Update-LicensingSheet {
         $startRow = 8  # Data starts at row 8 based on template structure
         $currentRow = $startRow
         
+        # CORRECT COLUMN STRUCTURE: B, D, F, H, J (not B, C, D, E!)
         foreach ($user in $TenantData.Users.Users) {
-            # Always add user even if no licenses
-            $worksheet.Cells[$currentRow, 2].Value = $user.DisplayName         # Column B: User Name
-            
-            # Handle license assignments properly
+            # ONLY include users who have actual licenses assigned
             if ($user.AssignedLicenses -and $user.AssignedLicenses.Count -gt 0) {
-                # Convert license array to proper format
-                $primaryLicense = $user.AssignedLicenses[0]
-                if ($primaryLicense -and $primaryLicense -ne 0) {
-                    $worksheet.Cells[$currentRow, 3].Value = $primaryLicense # Column C: Base License Type
-                } else {
-                    $worksheet.Cells[$currentRow, 3].Value = "No License Assigned"
+                # Check if they have real licenses (not null or 0)
+                $hasRealLicense = $false
+                foreach ($license in $user.AssignedLicenses) {
+                    if ($license -and $license -ne 0 -and $license -ne "" -and $license -ne "No License Assigned") {
+                        $hasRealLicense = $true
+                        break
+                    }
                 }
                 
-                # Additional licenses in subsequent columns
-                if ($user.AssignedLicenses.Count -gt 1) {
-                    $secondLicense = $user.AssignedLicenses[1]
-                    if ($secondLicense -and $secondLicense -ne 0) {
-                        $worksheet.Cells[$currentRow, 4].Value = $secondLicense  # Column D: Additional Software 1
+                if ($hasRealLicense) {
+                    $worksheet.Cells[$currentRow, 2].Value = $user.DisplayName         # Column B: User Name
+                    
+                    # Handle license assignments properly with correct columns
+                    $primaryLicense = $user.AssignedLicenses[0]
+                    if ($primaryLicense -and $primaryLicense -ne 0 -and $primaryLicense -ne "") {
+                        $worksheet.Cells[$currentRow, 4].Value = $primaryLicense     # Column D: Base License Type
+                    }
+                    
+                    # Additional licenses in correct columns
+                    if ($user.AssignedLicenses.Count -gt 1) {
+                        $secondLicense = $user.AssignedLicenses[1]
+                        if ($secondLicense -and $secondLicense -ne 0 -and $secondLicense -ne "") {
+                            $worksheet.Cells[$currentRow, 6].Value = $secondLicense  # Column F: Additional Software 1
+                        }
+                    }
+                    if ($user.AssignedLicenses.Count -gt 2) {
+                        $thirdLicense = $user.AssignedLicenses[2]
+                        if ($thirdLicense -and $thirdLicense -ne 0 -and $thirdLicense -ne "") {
+                            $worksheet.Cells[$currentRow, 8].Value = $thirdLicense   # Column H: Additional Software 2
+                        }
+                    }
+                    
+                    $currentRow++
+                    
+                    # Limit to prevent performance issues
+                    if ($currentRow -gt ($startRow + 500)) {
+                        break
                     }
                 }
-                if ($user.AssignedLicenses.Count -gt 2) {
-                    $thirdLicense = $user.AssignedLicenses[2]
-                    if ($thirdLicense -and $thirdLicense -ne 0) {
-                        $worksheet.Cells[$currentRow, 5].Value = $thirdLicense  # Column E: Additional Software 2
-                    }
-                }
-            } else {
-                $worksheet.Cells[$currentRow, 3].Value = "No License Assigned"  # Column C: Base License Type
-            }
-            
-            $currentRow++
-            
-            # Limit to prevent performance issues
-            if ($currentRow -gt ($startRow + 500)) {
-                break
             }
         }
         
-        Write-LogMessage -Message "Updated Licensing sheet with license assignments for $($currentRow - $startRow) users" -Type Success -LogOnly
+        Write-LogMessage -Message "Updated Licensing sheet with $($currentRow - $startRow) licensed users (unlicensed users excluded)" -Type Success -LogOnly
     }
     catch {
         Write-LogMessage -Message "Error updating Licensing sheet: $($_.Exception.Message)" -Type Warning -LogOnly
@@ -364,7 +371,7 @@ function Update-LicensingSheet {
 function Update-HardwareProfilesSheet {
     <#
     .SYNOPSIS
-        Populates the Hardware Profiles sheet with Intune policies
+        Populates the Hardware Profiles sheet with Intune policies in template format
     #>
     param (
         [Parameter(Mandatory = $true)]
@@ -381,39 +388,70 @@ function Update-HardwareProfilesSheet {
             return
         }
         
-        # Configuration Policies section (starts around row 10)
-        $configRow = 11  # Row for configuration policy names
-        $configCol = 2   # Column B
+        # Based on template analysis, this is a configuration template, not a policy list
+        # The template shows configuration options with settings
+        # Let's add our policies as configuration items
+        
+        # Configuration Policies section - add after existing content
+        $configStartRow = 45  # Start after the existing template content
+        $currentRow = $configStartRow
+        
+        # Add a header for our actual configured policies
+        $worksheet.Cells[$currentRow, 2].Value = "*** CONFIGURED DEVICE POLICIES ***"
+        $currentRow++
+        $currentRow++ # Skip a row
         
         if ($TenantData.Intune.DeviceConfigurationPolicies.Count -gt 0) {
+            $worksheet.Cells[$currentRow, 2].Value = "Configuration Policies Applied:"
+            $currentRow++
+            
             foreach ($policy in $TenantData.Intune.DeviceConfigurationPolicies) {
-                $worksheet.Cells[$configRow, $configCol].Value = $policy.DisplayName
-                $configRow++
+                $worksheet.Cells[$currentRow, 2].Value = $policy.DisplayName
+                $worksheet.Cells[$currentRow, 4].Value = "Applied"  # Status column
+                $currentRow++
                 
-                # Limit entries
-                if ($configRow -gt 20) { break }
+                # Limit entries to prevent overwriting template
+                if ($currentRow -gt ($configStartRow + 20)) { break }
             }
         } else {
-            $worksheet.Cells[11, $configCol].Value = "No configuration policies found"
+            $worksheet.Cells[$currentRow, 2].Value = "No configuration policies found"
+            $worksheet.Cells[$currentRow, 4].Value = "N/A"
+            $currentRow++
         }
         
-        # Compliance Policies section (starts around row 21)
-        $complianceRow = 22  # Row for compliance policy names
-        $complianceCol = 2   # Column B
+        # Add some spacing
+        $currentRow++
+        $currentRow++
         
+        # Compliance Policies section
         if ($TenantData.Intune.DeviceCompliancePolicies.Count -gt 0) {
+            $worksheet.Cells[$currentRow, 2].Value = "Compliance Policies Applied:"
+            $currentRow++
+            
             foreach ($policy in $TenantData.Intune.DeviceCompliancePolicies) {
-                $worksheet.Cells[$complianceRow, $complianceCol].Value = $policy.DisplayName
-                $complianceRow++
+                $worksheet.Cells[$currentRow, 2].Value = $policy.DisplayName
+                $worksheet.Cells[$currentRow, 4].Value = "Applied"  # Status column
+                $currentRow++
                 
-                # Limit entries
-                if ($complianceRow -gt 30) { break }
+                # Limit entries to prevent overwriting template  
+                if ($currentRow -gt ($configStartRow + 40)) { break }
             }
         } else {
-            $worksheet.Cells[22, $complianceCol].Value = "No compliance policies found"
+            $worksheet.Cells[$currentRow, 2].Value = "No compliance policies found"
+            $worksheet.Cells[$currentRow, 4].Value = "N/A"
+            $currentRow++
         }
         
-        Write-LogMessage -Message "Updated Hardware Profiles sheet with Intune policies" -Type Success -LogOnly
+        # Add a note about the template vs actual policies
+        $currentRow++
+        $currentRow++
+        $worksheet.Cells[$currentRow, 2].Value = "Note: The settings above show the template configuration options."
+        $currentRow++
+        $worksheet.Cells[$currentRow, 2].Value = "The policies listed in this section are the actual Intune policies"
+        $currentRow++
+        $worksheet.Cells[$currentRow, 2].Value = "that have been configured and applied to achieve these settings."
+        
+        Write-LogMessage -Message "Updated Hardware Profiles sheet with $(($TenantData.Intune.DeviceConfigurationPolicies.Count + $TenantData.Intune.DeviceCompliancePolicies.Count)) policies" -Type Success -LogOnly
     }
     catch {
         Write-LogMessage -Message "Error updating Hardware Profiles sheet: $($_.Exception.Message)" -Type Warning -LogOnly
@@ -524,7 +562,7 @@ function Update-SharePointLibrariesSheet {
 function Update-IntuneAppsSheets {
     <#
     .SYNOPSIS
-        Populates all Intune Apps sheets with actual app data
+        Populates all Intune Apps sheets with actual app data using correct column structure
     #>
     param (
         [Parameter(Mandatory = $true)]
@@ -535,45 +573,87 @@ function Update-IntuneAppsSheets {
     )
     
     try {
+        # CORRECT sheet names with trailing spaces where needed
         $appSheets = @(
             "Intune Windows Apps",
             "Intune Android Apps", 
-            "Intune Apple IOS Apps",
-            "Intune Apple iPadOS Apps",
+            "Intune Apple IOS Apps ",      # Note: trailing space
+            "Intune Apple iPadOS Apps ",   # Note: trailing space
             "Intune Mac OS Apps"
         )
         
         foreach ($sheetName in $appSheets) {
             $worksheet = $Excel.Workbook.Worksheets[$sheetName]
             if ($worksheet) {
-                $startRow = 8  # Start after headers (Application Name, Required, Optional, Selected users only)
+                $startRow = 8  # Start after headers
                 $currentRow = $startRow
                 
-                # Add actual managed apps
+                # CORRECT COLUMN STRUCTURE: B, D, F, H (not B, C, D, E!)
+                # Column B: Application Name
+                # Column D: Required  
+                # Column F: Optional
+                # Column H: Selected users only
+                
+                # Add actual managed apps if available
                 if ($TenantData.Intune.ManagedApps -and $TenantData.Intune.ManagedApps.Count -gt 0) {
+                    $appsAdded = 0
                     foreach ($app in $TenantData.Intune.ManagedApps) {
                         # Filter apps by platform if needed
                         $platformMatch = $true
-                        if ($sheetName -like "*Windows*" -and $app.DisplayName -notlike "*Windows*" -and $app.DisplayName -notlike "*Office*" -and $app.DisplayName -notlike "*Microsoft*") {
-                            $platformMatch = $false
+                        if ($sheetName -like "*Windows*") {
+                            # For Windows, include Office, Microsoft, Windows apps
+                            if ($app.DisplayName -notlike "*Microsoft*" -and 
+                                $app.DisplayName -notlike "*Office*" -and 
+                                $app.DisplayName -notlike "*Windows*" -and
+                                $app.DisplayName -notlike "*Edge*" -and
+                                $app.DisplayName -notlike "*Teams*") {
+                                $platformMatch = $false
+                            }
+                        }
+                        elseif ($sheetName -like "*Android*") {
+                            # For Android, include Android-specific or mobile apps
+                            if ($app.DisplayName -like "*Windows*" -or $app.DisplayName -like "*macOS*") {
+                                $platformMatch = $false
+                            }
+                        }
+                        elseif ($sheetName -like "*iOS*" -or $sheetName -like "*iPadOS*") {
+                            # For iOS/iPadOS, include iOS-specific or mobile apps
+                            if ($app.DisplayName -like "*Windows*" -or $app.DisplayName -like "*macOS*") {
+                                $platformMatch = $false
+                            }
+                        }
+                        elseif ($sheetName -like "*Mac*") {
+                            # For macOS, include macOS-specific apps
+                            if ($app.DisplayName -like "*Windows*" -and $app.DisplayName -notlike "*macOS*") {
+                                $platformMatch = $false
+                            }
                         }
                         
                         if ($platformMatch) {
                             $worksheet.Cells[$currentRow, 2].Value = $app.DisplayName    # Column B: Application Name
-                            $worksheet.Cells[$currentRow, 3].Value = "X"                # Column C: Required (assuming required)
+                            $worksheet.Cells[$currentRow, 4].Value = "X"                # Column D: Required (assuming required)
                             $currentRow++
+                            $appsAdded++
                             
                             # Limit entries per sheet
-                            if ($currentRow -gt ($startRow + 15)) { break }
+                            if ($appsAdded -ge 15 -or $currentRow -gt ($startRow + 15)) { break }
                         }
                     }
-                    Write-LogMessage -Message "Updated $sheetName sheet with managed apps" -Type Success -LogOnly
+                    
+                    if ($appsAdded -gt 0) {
+                        Write-LogMessage -Message "Updated $sheetName sheet with $appsAdded managed apps" -Type Success -LogOnly
+                    } else {
+                        # If no platform-specific apps found, add a note
+                        $worksheet.Cells[$startRow, 2].Value = "No platform-specific apps found"
+                        Write-LogMessage -Message "No platform-specific apps found for $sheetName" -Type Warning -LogOnly
+                    }
                 } else {
-                    # If no apps found, add a note
-                    $worksheet.Cells[$startRow, 2].Value = "No managed apps found"
-                    $worksheet.Cells[$startRow, 3].Value = ""
+                    # If no apps found at all, add a note
+                    $worksheet.Cells[$startRow, 2].Value = "No managed apps found in tenant"
                     Write-LogMessage -Message "No managed apps found for $sheetName" -Type Warning -LogOnly
                 }
+            } else {
+                Write-LogMessage -Message "Sheet '$sheetName' not found in template" -Type Warning -LogOnly
             }
         }
     }
@@ -585,7 +665,7 @@ function Update-IntuneAppsSheets {
 function Update-DistributionListsSheet {
     <#
     .SYNOPSIS
-        Populates the Distribution Lists sheet with proper table formatting
+        Populates the Distribution Lists sheet with proper table formatting and correct columns
     #>
     param (
         [Parameter(Mandatory = $true)]
@@ -602,26 +682,23 @@ function Update-DistributionListsSheet {
             return
         }
         
-        # Add proper headers if missing
-        $worksheet.Cells[7, 2].Value = "Distribution List Name"    # Column B: Group Name
-        $worksheet.Cells[7, 3].Value = "Description"              # Column C: Description  
-        $worksheet.Cells[7, 4].Value = "Member Count"             # Column D: Member Count
-        $worksheet.Cells[7, 6].Value = "Members"                  # Column F: Members
+        # Based on template analysis, the correct structure is:
+        # Row 8: Column B = "Distribution List Name", Column D = "Approver", Column F = "Members"
+        # So data should go in columns B, D, F (not B, C, D!)
         
-        $startRow = 8
+        $startRow = 9  # Data starts after headers in row 8
         $currentRow = $startRow
         
         foreach ($group in $TenantData.Groups.DistributionGroups) {
-            $worksheet.Cells[$currentRow, 2].Value = $group.DisplayName        # Column B: Group Name
-            $worksheet.Cells[$currentRow, 3].Value = Get-SafeString -Value $group.Description -MaxLength 100  # Column C: Description
-            $worksheet.Cells[$currentRow, 4].Value = $group.MemberCount        # Column D: Member Count
-            $worksheet.Cells[$currentRow, 6].Value = "See member details in Groups section"  # Column F: Members reference
+            $worksheet.Cells[$currentRow, 2].Value = $group.DisplayName                          # Column B: Distribution List Name
+            $worksheet.Cells[$currentRow, 4].Value = "IT Administrator"                          # Column D: Approver  
+            $worksheet.Cells[$currentRow, 6].Value = "$(Get-SafeString -Value $group.MemberCount -DefaultValue 'Unknown') members"  # Column F: Members info
             $currentRow++
             
             if ($currentRow -gt ($startRow + 20)) { break }
         }
         
-        Write-LogMessage -Message "Updated Distribution Lists sheet with $($currentRow - $startRow) groups" -Type Success -LogOnly
+        Write-LogMessage -Message "Updated Distribution Lists sheet with $($currentRow - $startRow) groups using correct column structure (B, D, F)" -Type Success -LogOnly
     }
     catch {
         Write-LogMessage -Message "Error updating Distribution Lists sheet: $($_.Exception.Message)" -Type Warning -LogOnly
@@ -631,7 +708,7 @@ function Update-DistributionListsSheet {
 function Update-WindowsUpdatesSheet {
     <#
     .SYNOPSIS
-        Populates the Windows Updates sheet
+        Populates the Windows Updates sheet with current update configuration info
     #>
     param (
         [Parameter(Mandatory = $true)]
@@ -648,9 +725,40 @@ function Update-WindowsUpdatesSheet {
             return
         }
         
-        # Add placeholder or actual update ring data if available
-        $worksheet.Cells[10, 2].Value = "Standard Update Ring Configured"
-        Write-LogMessage -Message "Updated Windows Updates sheet" -Type Success -LogOnly
+        # Add information about current Windows Update configuration
+        # The template has a complex structure, so we'll add our info in a safe area
+        $infoRow = 45  # Add after template content
+        
+        $worksheet.Cells[$infoRow, 2].Value = "*** CURRENT WINDOWS UPDATE CONFIGURATION ***"
+        $infoRow++
+        $infoRow++
+        
+        # Check if we have any Windows update policies from Intune
+        $updatePolicies = $TenantData.Intune.DeviceConfigurationPolicies | Where-Object { 
+            $_.DisplayName -like "*update*" -or $_.DisplayName -like "*ring*" 
+        }
+        
+        if ($updatePolicies.Count -gt 0) {
+            $worksheet.Cells[$infoRow, 2].Value = "Windows Update Policies Configured:"
+            $infoRow++
+            
+            foreach ($policy in $updatePolicies) {
+                $worksheet.Cells[$infoRow, 2].Value = "• $($policy.DisplayName)"
+                $infoRow++
+            }
+        } else {
+            $worksheet.Cells[$infoRow, 2].Value = "No specific Windows Update policies found in Intune"
+            $infoRow++
+            $worksheet.Cells[$infoRow, 2].Value = "Updates may be managed through default settings or other policies"
+        }
+        
+        $infoRow++
+        $infoRow++
+        $worksheet.Cells[$infoRow, 2].Value = "Note: The template above shows recommended update ring configuration."
+        $infoRow++
+        $worksheet.Cells[$infoRow, 2].Value = "Actual update policies are listed here for reference."
+        
+        Write-LogMessage -Message "Updated Windows Updates sheet with current configuration info" -Type Success -LogOnly
     }
     catch {
         Write-LogMessage -Message "Error updating Windows Updates sheet: $($_.Exception.Message)" -Type Warning -LogOnly
@@ -660,7 +768,7 @@ function Update-WindowsUpdatesSheet {
 function Update-SharedMailboxesSheet {
     <#
     .SYNOPSIS
-        Populates the Shared Mailboxes sheet
+        Populates the Shared Mailboxes sheet with correct sheet name (trailing space)
     #>
     param (
         [Parameter(Mandatory = $true)]
@@ -671,14 +779,20 @@ function Update-SharedMailboxesSheet {
     )
     
     try {
-        $worksheet = $Excel.Workbook.Worksheets["Shared Mailboxes"]
+        # CORRECT sheet name with trailing space
+        $worksheet = $Excel.Workbook.Worksheets["Shared Mailboxes "]  # Note: trailing space
         if (-not $worksheet) {
-            Write-LogMessage -Message "Shared Mailboxes worksheet not found in template" -Type Warning -LogOnly
+            Write-LogMessage -Message "Shared Mailboxes worksheet not found in template (checked with trailing space)" -Type Warning -LogOnly
             return
         }
         
-        # Add shared mailboxes from groups if any are mail-enabled
-        $startRow = 8
+        # Based on template analysis: headers are in row 8
+        # Column B: Shared Mailbox name
+        # Column D: Approver of changes/access requests  
+        # Column F: Read emails from a shared mailbox
+        # Column H: Send email from the shared mailbox
+        
+        $startRow = 9  # Data starts after headers
         $currentRow = $startRow
         
         # Look for actual shared mailboxes (mail-enabled groups or specific types)
@@ -690,7 +804,9 @@ function Update-SharedMailboxesSheet {
                 $_.DisplayName -like "*shared*" -or 
                 $_.DisplayName -like "*mailbox*" -or
                 $_.DisplayName -like "*info*" -or
-                $_.DisplayName -like "*support*"
+                $_.DisplayName -like "*support*" -or
+                $_.DisplayName -like "*admin*" -or
+                $_.DisplayName -like "*help*"
             }
         }
         
@@ -698,21 +814,27 @@ function Update-SharedMailboxesSheet {
         if ($TenantData.Groups.Microsoft365Groups) {
             $sharedMailboxes += $TenantData.Groups.Microsoft365Groups | Where-Object { 
                 $_.DisplayName -like "*shared*" -or 
-                $_.DisplayName -like "*mailbox*"
+                $_.DisplayName -like "*mailbox*" -or
+                $_.DisplayName -like "*info*" -or
+                $_.DisplayName -like "*support*"
             }
         }
         
         if ($sharedMailboxes.Count -gt 0) {
             foreach ($mailbox in $sharedMailboxes) {
-                $worksheet.Cells[$currentRow, 2].Value = $mailbox.DisplayName
-                $worksheet.Cells[$currentRow, 3].Value = Get-SafeString -Value $mailbox.Description -MaxLength 100
+                $worksheet.Cells[$currentRow, 2].Value = $mailbox.DisplayName                    # Column B: Shared Mailbox name
+                $worksheet.Cells[$currentRow, 4].Value = "IT Administrator"                      # Column D: Approver
+                $worksheet.Cells[$currentRow, 6].Value = "See group members"                     # Column F: Read emails
+                $worksheet.Cells[$currentRow, 8].Value = "See group members"                     # Column H: Send email
                 $currentRow++
                 
                 if ($currentRow -gt ($startRow + 10)) { break }
             }
             Write-LogMessage -Message "Updated Shared Mailboxes sheet with $($currentRow - $startRow) mailboxes" -Type Success -LogOnly
         } else {
+            # If no shared mailboxes found, add a note
             $worksheet.Cells[$startRow, 2].Value = "No shared mailboxes found"
+            $worksheet.Cells[$startRow, 4].Value = "N/A"
             Write-LogMessage -Message "No shared mailboxes found" -Type Warning -LogOnly
         }
     }
