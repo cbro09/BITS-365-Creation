@@ -279,7 +279,7 @@ function Update-UsersSheet {
             $currentRow++
             
             # Limit to prevent performance issues
-            if ($currentRow > $startRow + 500) {
+            if ($currentRow -gt ($startRow + 500)) {
                 Write-LogMessage -Message "Limited users export to first 500 users" -Type Warning -LogOnly
                 break
             }
@@ -332,7 +332,7 @@ function Update-LicensingSheet {
             }
             
             # Limit to prevent performance issues
-            if ($currentRow > $startRow + 500) {
+            if ($currentRow -gt ($startRow + 500)) {
                 break
             }
         }
@@ -374,7 +374,7 @@ function Update-HardwareProfilesSheet {
                 $configRow++
                 
                 # Limit entries
-                if ($configRow > 20) { break }
+                if ($configRow -gt 20) { break }
             }
         } else {
             $worksheet.Cells[11, $configCol].Value = "No configuration policies found"
@@ -390,7 +390,7 @@ function Update-HardwareProfilesSheet {
                 $complianceRow++
                 
                 # Limit entries
-                if ($complianceRow > 30) { break }
+                if ($complianceRow -gt 30) { break }
             }
         } else {
             $worksheet.Cells[22, $complianceCol].Value = "No compliance policies found"
@@ -446,7 +446,7 @@ function Update-ConditionalAccessSheet {
             $currentRow++
             
             # Limit entries
-            if ($currentRow > $startRow + 20) { break }
+            if ($currentRow -gt ($startRow + 20)) { break }
         }
         
         Write-LogMessage -Message "Updated Conditional Access sheet with $($currentRow - $startRow) policies" -Type Success -LogOnly
@@ -485,7 +485,7 @@ function Update-SharePointLibrariesSheet {
             $currentRow++
             
             # Limit entries
-            if ($currentRow > $startRow + 20) { break }
+            if ($currentRow -gt ($startRow + 20)) { break }
         }
         
         Write-LogMessage -Message "Updated SharePoint Libraries sheet" -Type Success -LogOnly
@@ -590,7 +590,7 @@ function Update-SharedMailboxesSheet {
             $worksheet.Cells[$currentRow, 2].Value = $mailbox.DisplayName
             $currentRow++
             
-            if ($currentRow > $startRow + 10) { break }
+            if ($currentRow -gt ($startRow + 10)) { break }
         }
         
         Write-LogMessage -Message "Updated Shared Mailboxes sheet" -Type Success -LogOnly
@@ -629,13 +629,78 @@ function Update-DistributionListsSheet {
             $worksheet.Cells[$currentRow, 4].Value = $group.MemberCount        # Member Count
             $currentRow++
             
-            if ($currentRow > $startRow + 20) { break }
+            if ($currentRow -gt ($startRow + 20)) { break }
         }
         
         Write-LogMessage -Message "Updated Distribution Lists sheet with $($currentRow - $startRow) groups" -Type Success -LogOnly
     }
     catch {
         Write-LogMessage -Message "Error updating Distribution Lists sheet: $($_.Exception.Message)" -Type Warning -LogOnly
+    }
+}
+
+# === Data Collection Functions ===
+
+function Get-CompleteTenantConfiguration {
+    <#
+    .SYNOPSIS
+        Gathers comprehensive tenant configuration data
+    #>
+    
+    Write-LogMessage -Message "Gathering tenant configuration data..." -Type Info
+    
+    $tenantData = @{
+        GeneratedOn = Get-Date
+        TenantInfo = @{}
+        Groups = @{}
+        ConditionalAccess = @{}
+        SharePoint = @{}
+        Intune = @{}
+        Users = @{}
+        Licenses = @{}
+        Security = @{}
+        Compliance = @{}
+    }
+    
+    try {
+        # Basic Tenant Information
+        Write-LogMessage -Message "Collecting tenant information..." -Type Info -LogOnly
+        $tenantData.TenantInfo = Get-TenantInformation
+        
+        # Groups Information
+        Write-LogMessage -Message "Collecting groups information..." -Type Info -LogOnly
+        $tenantData.Groups = Get-GroupsInformation
+        
+        # Conditional Access Policies
+        Write-LogMessage -Message "Collecting conditional access policies..." -Type Info -LogOnly
+        $tenantData.ConditionalAccess = Get-ConditionalAccessInformation
+        
+        # SharePoint Information
+        Write-LogMessage -Message "Collecting SharePoint information..." -Type Info -LogOnly
+        $tenantData.SharePoint = Get-SharePointInformation
+        
+        # Intune Information
+        Write-LogMessage -Message "Collecting Intune information..." -Type Info -LogOnly
+        $tenantData.Intune = Get-IntuneInformation
+        
+        # Users Information
+        Write-LogMessage -Message "Collecting users information..." -Type Info -LogOnly
+        $tenantData.Users = Get-UsersInformation
+        
+        # License Information
+        Write-LogMessage -Message "Collecting license information..." -Type Info -LogOnly
+        $tenantData.Licenses = Get-LicenseInformation
+        
+        # Security Settings
+        Write-LogMessage -Message "Collecting security settings..." -Type Info -LogOnly
+        $tenantData.Security = Get-SecurityInformation
+        
+        Write-LogMessage -Message "Tenant configuration data collection completed" -Type Success -LogOnly
+        return $tenantData
+    }
+    catch {
+        Write-LogMessage -Message "Error collecting tenant data: $($_.Exception.Message)" -Type Error
+        return $tenantData
     }
 }
     <#
