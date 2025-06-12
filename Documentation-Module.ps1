@@ -316,20 +316,37 @@ function Update-LicensingSheet {
         $currentRow = $startRow
         
         foreach ($user in $TenantData.Users.Users) {
+            # Always add user even if no licenses
+            $worksheet.Cells[$currentRow, 2].Value = $user.DisplayName         # Column B: User Name
+            
+            # Handle license assignments properly
             if ($user.AssignedLicenses -and $user.AssignedLicenses.Count -gt 0) {
-                $worksheet.Cells[$currentRow, 2].Value = $user.DisplayName         # Column B: User Name
-                $worksheet.Cells[$currentRow, 3].Value = $user.AssignedLicenses[0] # Column C: Base License Type
+                # Convert license array to proper format
+                $primaryLicense = $user.AssignedLicenses[0]
+                if ($primaryLicense -and $primaryLicense -ne 0) {
+                    $worksheet.Cells[$currentRow, 3].Value = $primaryLicense # Column C: Base License Type
+                } else {
+                    $worksheet.Cells[$currentRow, 3].Value = "No License Assigned"
+                }
                 
                 # Additional licenses in subsequent columns
                 if ($user.AssignedLicenses.Count -gt 1) {
-                    $worksheet.Cells[$currentRow, 4].Value = $user.AssignedLicenses[1]  # Column D: Additional Software 1
+                    $secondLicense = $user.AssignedLicenses[1]
+                    if ($secondLicense -and $secondLicense -ne 0) {
+                        $worksheet.Cells[$currentRow, 4].Value = $secondLicense  # Column D: Additional Software 1
+                    }
                 }
                 if ($user.AssignedLicenses.Count -gt 2) {
-                    $worksheet.Cells[$currentRow, 5].Value = $user.AssignedLicenses[2]  # Column E: Additional Software 2
+                    $thirdLicense = $user.AssignedLicenses[2]
+                    if ($thirdLicense -and $thirdLicense -ne 0) {
+                        $worksheet.Cells[$currentRow, 5].Value = $thirdLicense  # Column E: Additional Software 2
+                    }
                 }
-                
-                $currentRow++
+            } else {
+                $worksheet.Cells[$currentRow, 3].Value = "No License Assigned"  # Column C: Base License Type
             }
+            
+            $currentRow++
             
             # Limit to prevent performance issues
             if ($currentRow -gt ($startRow + 500)) {
@@ -337,7 +354,7 @@ function Update-LicensingSheet {
             }
         }
         
-        Write-LogMessage -Message "Updated Licensing sheet with license assignments" -Type Success -LogOnly
+        Write-LogMessage -Message "Updated Licensing sheet with license assignments for $($currentRow - $startRow) users" -Type Success -LogOnly
     }
     catch {
         Write-LogMessage -Message "Error updating Licensing sheet: $($_.Exception.Message)" -Type Warning -LogOnly
@@ -479,19 +496,135 @@ function Update-SharePointLibrariesSheet {
         $startRow = 13  # Start after template entries
         $currentRow = $startRow
         
-        foreach ($site in $TenantData.SharePoint.SiteCollections) {
-            $worksheet.Cells[$currentRow, 2].Value = $site.DisplayName  # Column B: Site Name
-            $worksheet.Cells[$currentRow, 4].Value = "Site Admin"       # Column D: Approver
-            $currentRow++
-            
-            # Limit entries
-            if ($currentRow -gt ($startRow + 20)) { break }
+        # Add actual SharePoint sites
+        if ($TenantData.SharePoint.SiteCollections -and $TenantData.SharePoint.SiteCollections.Count -gt 0) {
+            foreach ($site in $TenantData.SharePoint.SiteCollections) {
+                $worksheet.Cells[$currentRow, 2].Value = $site.DisplayName  # Column B: Site Name
+                $worksheet.Cells[$currentRow, 4].Value = "Site Admin"       # Column D: Approver
+                $worksheet.Cells[$currentRow, 6].Value = "Site Owners"      # Column F: Owners
+                $worksheet.Cells[$currentRow, 8].Value = "Site Members"     # Column H: Members
+                $currentRow++
+                
+                # Limit entries
+                if ($currentRow -gt ($startRow + 20)) { break }
+            }
+            Write-LogMessage -Message "Updated SharePoint Libraries sheet with $($currentRow - $startRow) sites" -Type Success -LogOnly
+        } else {
+            # If no sites found, add a note
+            $worksheet.Cells[$startRow, 2].Value = "No SharePoint sites found or unable to access"
+            $worksheet.Cells[$startRow, 4].Value = "N/A"
+            Write-LogMessage -Message "No SharePoint sites found to populate" -Type Warning -LogOnly
         }
-        
-        Write-LogMessage -Message "Updated SharePoint Libraries sheet" -Type Success -LogOnly
     }
     catch {
         Write-LogMessage -Message "Error updating SharePoint Libraries sheet: $($_.Exception.Message)" -Type Warning -LogOnly
+    }
+}
+
+function Update-IntuneAppsSheets {
+    <#
+    .SYNOPSIS
+        Populates all Intune Apps sheets with actual app data
+    #>
+    param (
+        [Parameter(Mandatory = $true)]
+        $Excel,
+        
+        [Parameter(Mandatory = $true)]
+        [hashtable]$TenantData
+    )
+    
+    try {
+        $appSheets = @(
+            "Intune Windows Apps",
+            "Intune Android Apps", 
+            "Intune Apple IOS Apps",
+            "Intune Apple iPadOS Apps",
+            "Intune Mac OS Apps"
+        )
+        
+        foreach ($sheetName in $appSheets) {
+            $worksheet = $Excel.Workbook.Worksheets[$sheetName]
+            if ($worksheet) {
+                $startRow = 8  # Start after headers (Application Name, Required, Optional, Selected users only)
+                $currentRow = $startRow
+                
+                # Add actual managed apps
+                if ($TenantData.Intune.ManagedApps -and $TenantData.Intune.ManagedApps.Count -gt 0) {
+                    foreach ($app in $TenantData.Intune.ManagedApps) {
+                        # Filter apps by platform if needed
+                        $platformMatch = $true
+                        if ($sheetName -like "*Windows*" -and $app.DisplayName -notlike "*Windows*" -and $app.DisplayName -notlike "*Office*" -and $app.DisplayName -notlike "*Microsoft*") {
+                            $platformMatch = $false
+                        }
+                        
+                        if ($platformMatch) {
+                            $worksheet.Cells[$currentRow, 2].Value = $app.DisplayName    # Column B: Application Name
+                            $worksheet.Cells[$currentRow, 3].Value = "X"                # Column C: Required (assuming required)
+                            $currentRow++
+                            
+                            # Limit entries per sheet
+                            if ($currentRow -gt ($startRow + 15)) { break }
+                        }
+                    }
+                    Write-LogMessage -Message "Updated $sheetName sheet with managed apps" -Type Success -LogOnly
+                } else {
+                    # If no apps found, add a note
+                    $worksheet.Cells[$startRow, 2].Value = "No managed apps found"
+                    $worksheet.Cells[$startRow, 3].Value = ""
+                    Write-LogMessage -Message "No managed apps found for $sheetName" -Type Warning -LogOnly
+                }
+            }
+        }
+    }
+    catch {
+        Write-LogMessage -Message "Error updating Intune Apps sheets: $($_.Exception.Message)" -Type Warning -LogOnly
+    }
+}
+
+function Update-DistributionListsSheet {
+    <#
+    .SYNOPSIS
+        Populates the Distribution Lists sheet with proper table formatting
+    #>
+    param (
+        [Parameter(Mandatory = $true)]
+        $Excel,
+        
+        [Parameter(Mandatory = $true)]
+        [hashtable]$TenantData
+    )
+    
+    try {
+        $worksheet = $Excel.Workbook.Worksheets["Distribution list"]
+        if (-not $worksheet) {
+            Write-LogMessage -Message "Distribution Lists worksheet not found in template" -Type Warning -LogOnly
+            return
+        }
+        
+        # Add proper headers if missing
+        $worksheet.Cells[7, 2].Value = "Distribution List Name"    # Column B: Group Name
+        $worksheet.Cells[7, 3].Value = "Description"              # Column C: Description  
+        $worksheet.Cells[7, 4].Value = "Member Count"             # Column D: Member Count
+        $worksheet.Cells[7, 6].Value = "Members"                  # Column F: Members
+        
+        $startRow = 8
+        $currentRow = $startRow
+        
+        foreach ($group in $TenantData.Groups.DistributionGroups) {
+            $worksheet.Cells[$currentRow, 2].Value = $group.DisplayName        # Column B: Group Name
+            $worksheet.Cells[$currentRow, 3].Value = Get-SafeString -Value $group.Description -MaxLength 100  # Column C: Description
+            $worksheet.Cells[$currentRow, 4].Value = $group.MemberCount        # Column D: Member Count
+            $worksheet.Cells[$currentRow, 6].Value = "See member details in Groups section"  # Column F: Members reference
+            $currentRow++
+            
+            if ($currentRow -gt ($startRow + 20)) { break }
+        }
+        
+        Write-LogMessage -Message "Updated Distribution Lists sheet with $($currentRow - $startRow) groups" -Type Success -LogOnly
+    }
+    catch {
+        Write-LogMessage -Message "Error updating Distribution Lists sheet: $($_.Exception.Message)" -Type Warning -LogOnly
     }
 }
 
@@ -524,42 +657,6 @@ function Update-WindowsUpdatesSheet {
     }
 }
 
-function Update-IntuneAppsSheets {
-    <#
-    .SYNOPSIS
-        Populates all Intune Apps sheets
-    #>
-    param (
-        [Parameter(Mandatory = $true)]
-        $Excel,
-        
-        [Parameter(Mandatory = $true)]
-        [hashtable]$TenantData
-    )
-    
-    try {
-        $appSheets = @(
-            "Intune Windows Apps",
-            "Intune Android Apps", 
-            "Intune Apple IOS Apps",
-            "Intune Apple iPadOS Apps",
-            "Intune Mac OS Apps"
-        )
-        
-        foreach ($sheetName in $appSheets) {
-            $worksheet = $Excel.Workbook.Worksheets[$sheetName]
-            if ($worksheet) {
-                # Add placeholder indicating apps are configured
-                $worksheet.Cells[15, 2].Value = "Apps configured via Intune"
-                Write-LogMessage -Message "Updated $sheetName sheet" -Type Success -LogOnly
-            }
-        }
-    }
-    catch {
-        Write-LogMessage -Message "Error updating Intune Apps sheets: $($_.Exception.Message)" -Type Warning -LogOnly
-    }
-}
-
 function Update-SharedMailboxesSheet {
     <#
     .SYNOPSIS
@@ -584,58 +681,43 @@ function Update-SharedMailboxesSheet {
         $startRow = 8
         $currentRow = $startRow
         
-        $sharedMailboxes = $TenantData.Groups.DistributionGroups | Where-Object { $_.DisplayName -like "*shared*" -or $_.DisplayName -like "*mailbox*" }
+        # Look for actual shared mailboxes (mail-enabled groups or specific types)
+        $sharedMailboxes = @()
         
-        foreach ($mailbox in $sharedMailboxes) {
-            $worksheet.Cells[$currentRow, 2].Value = $mailbox.DisplayName
-            $currentRow++
-            
-            if ($currentRow -gt ($startRow + 10)) { break }
+        # Check distribution groups that might be shared mailboxes
+        if ($TenantData.Groups.DistributionGroups) {
+            $sharedMailboxes += $TenantData.Groups.DistributionGroups | Where-Object { 
+                $_.DisplayName -like "*shared*" -or 
+                $_.DisplayName -like "*mailbox*" -or
+                $_.DisplayName -like "*info*" -or
+                $_.DisplayName -like "*support*"
+            }
         }
         
-        Write-LogMessage -Message "Updated Shared Mailboxes sheet" -Type Success -LogOnly
+        # Check Microsoft 365 groups that might be shared mailboxes
+        if ($TenantData.Groups.Microsoft365Groups) {
+            $sharedMailboxes += $TenantData.Groups.Microsoft365Groups | Where-Object { 
+                $_.DisplayName -like "*shared*" -or 
+                $_.DisplayName -like "*mailbox*"
+            }
+        }
+        
+        if ($sharedMailboxes.Count -gt 0) {
+            foreach ($mailbox in $sharedMailboxes) {
+                $worksheet.Cells[$currentRow, 2].Value = $mailbox.DisplayName
+                $worksheet.Cells[$currentRow, 3].Value = Get-SafeString -Value $mailbox.Description -MaxLength 100
+                $currentRow++
+                
+                if ($currentRow -gt ($startRow + 10)) { break }
+            }
+            Write-LogMessage -Message "Updated Shared Mailboxes sheet with $($currentRow - $startRow) mailboxes" -Type Success -LogOnly
+        } else {
+            $worksheet.Cells[$startRow, 2].Value = "No shared mailboxes found"
+            Write-LogMessage -Message "No shared mailboxes found" -Type Warning -LogOnly
+        }
     }
     catch {
         Write-LogMessage -Message "Error updating Shared Mailboxes sheet: $($_.Exception.Message)" -Type Warning -LogOnly
-    }
-}
-
-function Update-DistributionListsSheet {
-    <#
-    .SYNOPSIS
-        Populates the Distribution Lists sheet
-    #>
-    param (
-        [Parameter(Mandatory = $true)]
-        $Excel,
-        
-        [Parameter(Mandatory = $true)]
-        [hashtable]$TenantData
-    )
-    
-    try {
-        $worksheet = $Excel.Workbook.Worksheets["Distribution list"]
-        if (-not $worksheet) {
-            Write-LogMessage -Message "Distribution Lists worksheet not found in template" -Type Warning -LogOnly
-            return
-        }
-        
-        $startRow = 8
-        $currentRow = $startRow
-        
-        foreach ($group in $TenantData.Groups.DistributionGroups) {
-            $worksheet.Cells[$currentRow, 2].Value = $group.DisplayName        # Group Name
-            $worksheet.Cells[$currentRow, 3].Value = $group.Description        # Description
-            $worksheet.Cells[$currentRow, 4].Value = $group.MemberCount        # Member Count
-            $currentRow++
-            
-            if ($currentRow -gt ($startRow + 20)) { break }
-        }
-        
-        Write-LogMessage -Message "Updated Distribution Lists sheet with $($currentRow - $startRow) groups" -Type Success -LogOnly
-    }
-    catch {
-        Write-LogMessage -Message "Error updating Distribution Lists sheet: $($_.Exception.Message)" -Type Warning -LogOnly
     }
 }
 
@@ -856,8 +938,6 @@ function Get-SharePointInformation {
     #>
     
     try {
-        # This would require SharePoint Online PowerShell module
-        # For now, return placeholder structure
         $spInfo = @{
             TenantSettings = @{}
             SiteCollections = @()
@@ -867,29 +947,118 @@ function Get-SharePointInformation {
             ExternalSharingEnabled = "Not available"
         }
         
-        # Try to get basic SharePoint info through Graph if available
+        # Try to get SharePoint sites through Graph API
         try {
-            $sites = Get-MgSite -All -Top 50
-            $spInfo.TotalSites = $sites.Count
-            $spInfo.SiteCollections = $sites | ForEach-Object {
-                @{
-                    Id = $_.Id
-                    DisplayName = $_.DisplayName
-                    WebUrl = $_.WebUrl
-                    CreatedDateTime = $_.CreatedDateTime
-                    LastModifiedDateTime = $_.LastModifiedDateTime
+            Write-LogMessage -Message "Collecting SharePoint sites..." -Type Info -LogOnly
+            
+            # Try different approaches to get SharePoint sites
+            $sites = @()
+            
+            # Method 1: Try to get all sites
+            try {
+                $allSites = Get-MgSite -All -Top 100
+                $sites += $allSites
+                Write-LogMessage -Message "Found $($allSites.Count) sites using Get-MgSite -All" -Type Info -LogOnly
+            }
+            catch {
+                Write-LogMessage -Message "Get-MgSite -All failed: $($_.Exception.Message)" -Type Warning -LogOnly
+            }
+            
+            # Method 2: Try to search for sites
+            if ($sites.Count -eq 0) {
+                try {
+                    $searchSites = Get-MgSite -Search "*"
+                    $sites += $searchSites
+                    Write-LogMessage -Message "Found $($searchSites.Count) sites using search" -Type Info -LogOnly
                 }
+                catch {
+                    Write-LogMessage -Message "Site search failed: $($_.Exception.Message)" -Type Warning -LogOnly
+                }
+            }
+            
+            # Method 3: Try to get root site and subsites
+            if ($sites.Count -eq 0) {
+                try {
+                    $rootSite = Get-MgSite -SiteId "root"
+                    if ($rootSite) {
+                        $sites += $rootSite
+                        Write-LogMessage -Message "Found root site" -Type Info -LogOnly
+                        
+                        # Try to get subsites
+                        try {
+                            $subSites = Get-MgSiteSite -SiteId $rootSite.Id
+                            $sites += $subSites
+                            Write-LogMessage -Message "Found $($subSites.Count) subsites" -Type Info -LogOnly
+                        }
+                        catch {
+                            Write-LogMessage -Message "Could not get subsites: $($_.Exception.Message)" -Type Warning -LogOnly
+                        }
+                    }
+                }
+                catch {
+                    Write-LogMessage -Message "Could not get root site: $($_.Exception.Message)" -Type Warning -LogOnly
+                }
+            }
+            
+            # Process found sites
+            if ($sites.Count -gt 0) {
+                $spInfo.TotalSites = $sites.Count
+                $spInfo.SiteCollections = $sites | ForEach-Object {
+                    @{
+                        Id = $_.Id
+                        DisplayName = $_.DisplayName
+                        Name = $_.Name
+                        WebUrl = $_.WebUrl
+                        CreatedDateTime = $_.CreatedDateTime
+                        LastModifiedDateTime = $_.LastModifiedDateTime
+                        SiteCollection = $_.SiteCollection
+                    }
+                }
+                Write-LogMessage -Message "Successfully collected $($sites.Count) SharePoint sites" -Type Success -LogOnly
+            } else {
+                Write-LogMessage -Message "No SharePoint sites found through any method" -Type Warning -LogOnly
+                # Add a placeholder entry to indicate we tried but found nothing
+                $spInfo.SiteCollections = @(
+                    @{
+                        Id = "N/A"
+                        DisplayName = "No sites accessible"
+                        Name = "N/A"
+                        WebUrl = "N/A"
+                        CreatedDateTime = Get-Date
+                        LastModifiedDateTime = Get-Date
+                        SiteCollection = $null
+                    }
+                )
             }
         }
         catch {
-            Write-LogMessage -Message "SharePoint sites information not available through Graph API" -Type Warning -LogOnly
+            Write-LogMessage -Message "SharePoint sites collection failed: $($_.Exception.Message)" -Type Warning -LogOnly
+            # Add error indicator
+            $spInfo.SiteCollections = @(
+                @{
+                    Id = "ERROR"
+                    DisplayName = "Error accessing SharePoint data"
+                    Name = "ERROR"
+                    WebUrl = "Check permissions"
+                    CreatedDateTime = Get-Date
+                    LastModifiedDateTime = Get-Date
+                    SiteCollection = $null
+                }
+            )
         }
         
         return $spInfo
     }
     catch {
         Write-LogMessage -Message "Error collecting SharePoint information: $($_.Exception.Message)" -Type Warning -LogOnly
-        return @{}
+        return @{
+            TenantSettings = @{}
+            SiteCollections = @()
+            TotalSites = 0
+            StorageUsed = "Error"
+            SharingSettings = "Error"
+            ExternalSharingEnabled = "Error"
+        }
     }
 }
 
@@ -906,12 +1075,15 @@ function Get-IntuneInformation {
             AppProtectionPolicies = @()
             EnrollmentRestrictions = @()
             ManagedDevices = @()
+            ManagedApps = @()
             TotalDevices = 0
         }
         
-        # Device Compliance Policies
+        # Device Compliance Policies - Get ALL, not limited
         try {
+            Write-LogMessage -Message "Collecting device compliance policies..." -Type Info -LogOnly
             $compliancePolicies = Get-MgDeviceManagementDeviceCompliancePolicy -All
+            Write-LogMessage -Message "Found $($compliancePolicies.Count) compliance policies" -Type Info -LogOnly
             $intuneInfo.DeviceCompliancePolicies = $compliancePolicies | ForEach-Object {
                 @{
                     Id = $_.Id
@@ -924,12 +1096,14 @@ function Get-IntuneInformation {
             }
         }
         catch {
-            Write-LogMessage -Message "Could not retrieve device compliance policies" -Type Warning -LogOnly
+            Write-LogMessage -Message "Could not retrieve device compliance policies: $($_.Exception.Message)" -Type Warning -LogOnly
         }
         
-        # Device Configuration Policies
+        # Device Configuration Policies - Get ALL, not limited
         try {
+            Write-LogMessage -Message "Collecting device configuration policies..." -Type Info -LogOnly
             $configPolicies = Get-MgDeviceManagementDeviceConfiguration -All
+            Write-LogMessage -Message "Found $($configPolicies.Count) configuration policies" -Type Info -LogOnly
             $intuneInfo.DeviceConfigurationPolicies = $configPolicies | ForEach-Object {
                 @{
                     Id = $_.Id
@@ -942,13 +1116,35 @@ function Get-IntuneInformation {
             }
         }
         catch {
-            Write-LogMessage -Message "Could not retrieve device configuration policies" -Type Warning -LogOnly
+            Write-LogMessage -Message "Could not retrieve device configuration policies: $($_.Exception.Message)" -Type Warning -LogOnly
+        }
+        
+        # Managed Apps - NEW: Collect managed applications
+        try {
+            Write-LogMessage -Message "Collecting managed applications..." -Type Info -LogOnly
+            $managedApps = Get-MgDeviceManagementMobileApp -All
+            Write-LogMessage -Message "Found $($managedApps.Count) managed apps" -Type Info -LogOnly
+            $intuneInfo.ManagedApps = $managedApps | ForEach-Object {
+                @{
+                    Id = $_.Id
+                    DisplayName = $_.DisplayName
+                    Description = $_.Description
+                    Publisher = $_.Publisher
+                    CreatedDateTime = $_.CreatedDateTime
+                    LastModifiedDateTime = $_.LastModifiedDateTime
+                }
+            }
+        }
+        catch {
+            Write-LogMessage -Message "Could not retrieve managed applications: $($_.Exception.Message)" -Type Warning -LogOnly
         }
         
         # Managed Devices
         try {
-            $devices = Get-MgDeviceManagementManagedDevice -All -Top 100
+            Write-LogMessage -Message "Collecting managed devices..." -Type Info -LogOnly
+            $devices = Get-MgDeviceManagementManagedDevice -All -Top 500
             $intuneInfo.TotalDevices = $devices.Count
+            Write-LogMessage -Message "Found $($devices.Count) managed devices" -Type Info -LogOnly
             $intuneInfo.ManagedDevices = $devices | ForEach-Object {
                 @{
                     Id = $_.Id
@@ -963,9 +1159,10 @@ function Get-IntuneInformation {
             }
         }
         catch {
-            Write-LogMessage -Message "Could not retrieve managed devices" -Type Warning -LogOnly
+            Write-LogMessage -Message "Could not retrieve managed devices: $($_.Exception.Message)" -Type Warning -LogOnly
         }
         
+        Write-LogMessage -Message "Intune data collection completed - Config: $($intuneInfo.DeviceConfigurationPolicies.Count), Compliance: $($intuneInfo.DeviceCompliancePolicies.Count), Apps: $($intuneInfo.ManagedApps.Count)" -Type Info -LogOnly
         return $intuneInfo
     }
     catch {
