@@ -286,145 +286,168 @@ function Update-ExcelWithTenantData {
     Write-LogMessage -Message "Updating Excel file with tenant configuration data..." -Type Info
     
     try {
-        # Open the Excel file
-        $excel = Open-ExcelPackage -Path $ExcelPath
+        # Method 1: Use ImportExcel module functions directly
+        Write-LogMessage -Message "Using ImportExcel module to update spreadsheet..." -Type Info
         
         # Update M365 Due Diligence sheet - Replace company name placeholder
-        if ($excel.Workbook.Worksheets["M365 Due Dilligence"]) {
-            $sheet = $excel.Workbook.Worksheets["M365 Due Dilligence"]
-            $cell = $sheet.Cells["C7"]
-            if ($cell.Value -and $cell.Value.ToString().Contains("{CompanyName}")) {
-                $cell.Value = $cell.Value.ToString().Replace("{CompanyName}", $TenantData.TenantInfo.TenantName)
-                Write-LogMessage -Message "Updated company name in Due Diligence sheet" -Type Success -LogOnly
+        try {
+            $dueDilData = Import-Excel -Path $ExcelPath -WorksheetName "M365 Due Dilligence" -NoHeader
+            if ($dueDilData -and $dueDilData.Count -gt 6) {
+                # Find and replace company name in row 7 (index 6)
+                for ($i = 0; $i -lt $dueDilData[6].PSObject.Properties.Count; $i++) {
+                    $propName = "P$($i + 1)"
+                    if ($dueDilData[6].$propName -and $dueDilData[6].$propName.ToString().Contains("{CompanyName}")) {
+                        $dueDilData[6].$propName = $dueDilData[6].$propName.ToString().Replace("{CompanyName}", $TenantData.TenantInfo.TenantName)
+                        
+                        # Export back to Excel
+                        $dueDilData | Export-Excel -Path $ExcelPath -WorksheetName "M365 Due Dilligence" -NoHeader -AutoSize
+                        Write-LogMessage -Message "Updated company name in Due Diligence sheet" -Type Success -LogOnly
+                        break
+                    }
+                }
             }
         }
+        catch {
+            Write-LogMessage -Message "Could not update Due Diligence sheet: $($_.Exception.Message)" -Type Warning -LogOnly
+        }
         
-        # Update Users sheet
-        if ($excel.Workbook.Worksheets["Users"] -and $TenantData.Users.Count -gt 0) {
-            $sheet = $excel.Workbook.Worksheets["Users"]
-            $startRow = 7  # Data starts at row 7 based on analysis
-            
-            for ($i = 0; $i -lt $TenantData.Users.Count; $i++) {
-                $user = $TenantData.Users[$i]
-                $row = $startRow + $i
+        # Update Users sheet with actual user data
+        if ($TenantData.Users.Count -gt 0) {
+            try {
+                # Create user data array for export
+                $userData = @()
+                $userData += [PSCustomObject]@{
+                    'First Name' = 'First Name'
+                    'Last Name' = 'Last Name'
+                    'Email' = 'Email'
+                    'Job Title' = 'Job Title'
+                    'Manager email' = 'Manager email'
+                    'Department' = 'Department'
+                    'Office location' = 'Office location'
+                    'Phone Number' = 'Phone Number'
+                }
                 
-                $sheet.Cells["A$row"].Value = $user.FirstName
-                $sheet.Cells["B$row"].Value = $user.LastName  
-                $sheet.Cells["C$row"].Value = $user.Email
-                $sheet.Cells["D$row"].Value = $user.JobTitle
-                $sheet.Cells["E$row"].Value = $user.ManagerEmail
-                $sheet.Cells["F$row"].Value = $user.Department
-                $sheet.Cells["G$row"].Value = $user.OfficeLocation
-                $sheet.Cells["H$row"].Value = $user.PhoneNumber
+                foreach ($user in $TenantData.Users) {
+                    $userData += [PSCustomObject]@{
+                        'First Name' = $user.FirstName
+                        'Last Name' = $user.LastName
+                        'Email' = $user.Email
+                        'Job Title' = $user.JobTitle
+                        'Manager email' = $user.ManagerEmail
+                        'Department' = $user.Department
+                        'Office location' = $user.OfficeLocation
+                        'Phone Number' = $user.PhoneNumber
+                    }
+                }
+                
+                # Export to Users sheet starting at row 6
+                $userData | Export-Excel -Path $ExcelPath -WorksheetName "Users" -StartRow 6 -AutoSize -TableName "UsersTable" -TableStyle Medium2
+                Write-LogMessage -Message "Updated Users sheet with $($TenantData.Users.Count) users" -Type Success -LogOnly
             }
-            Write-LogMessage -Message "Updated Users sheet with $($TenantData.Users.Count) users" -Type Success -LogOnly
+            catch {
+                Write-LogMessage -Message "Could not update Users sheet: $($_.Exception.Message)" -Type Warning -LogOnly
+            }
         }
         
         # Update Licensing sheet
-        if ($excel.Workbook.Worksheets["Licensing"] -and $TenantData.Users.Count -gt 0) {
-            $sheet = $excel.Workbook.Worksheets["Licensing"]
-            $startRow = 8  # Data starts at row 8 based on analysis
-            
-            for ($i = 0; $i -lt $TenantData.Users.Count; $i++) {
-                $user = $TenantData.Users[$i]
-                $row = $startRow + $i
+        if ($TenantData.Users.Count -gt 0) {
+            try {
+                # Create licensing data array
+                $licensingData = @()
+                $licensingData += [PSCustomObject]@{
+                    'User Name' = 'User Name'
+                    'Base License Type' = 'Base License Type'
+                    'Additional Software 1' = 'Additional Software 1'
+                    'Additional Software 2' = 'Additional Software 2'
+                }
                 
-                $sheet.Cells["B$row"].Value = $user.Email  # User Name
-                $sheet.Cells["D$row"].Value = $user.LicenseType  # Base License Type
-            }
-            Write-LogMessage -Message "Updated Licensing sheet with user license information" -Type Success -LogOnly
-        }
-        
-        # Update SharePoint Libraries sheet
-        if ($excel.Workbook.Worksheets["SharePoint Libaries"] -and $TenantData.SharePointSites.Count -gt 0) {
-            $sheet = $excel.Workbook.Worksheets["SharePoint Libaries"]
-            # Libraries are pre-populated in rows 7-12, just confirm they exist
-            Write-LogMessage -Message "SharePoint Libraries sheet maintained with default library structure" -Type Success -LogOnly
-        }
-        
-        # Update Conditional Access sheet
-        if ($excel.Workbook.Worksheets["Conditional Access"] -and $TenantData.ConditionalAccessPolicies.Count -gt 0) {
-            $sheet = $excel.Workbook.Worksheets["Conditional Access"]
-            # Policies are pre-populated in rows 9-12, update status if needed
-            $policyRows = @{
-                "User Risk" = 9
-                "Block Legacy Auth" = 10
-                "MFA for all Users" = 11
-                "Non Corporate Device Block" = 12
-            }
-            
-            foreach ($policy in $TenantData.ConditionalAccessPolicies) {
-                $mappedName = Get-PolicyMappedName -PolicyName $policy.Name
-                if ($policyRows.ContainsKey($mappedName)) {
-                    $row = $policyRows[$mappedName]
-                    $currentSetting = $sheet.Cells["D$row"].Value
-                    $sheet.Cells["D$row"].Value = "$currentSetting (Status: $($policy.State))"
+                foreach ($user in $TenantData.Users) {
+                    if ($user.LicenseType) {
+                        $licensingData += [PSCustomObject]@{
+                            'User Name' = $user.Email
+                            'Base License Type' = $user.LicenseType
+                            'Additional Software 1' = ''
+                            'Additional Software 2' = ''
+                        }
+                    }
+                }
+                
+                if ($licensingData.Count -gt 1) {
+                    # Export to Licensing sheet starting at row 7
+                    $licensingData | Export-Excel -Path $ExcelPath -WorksheetName "Licensing" -StartRow 7 -StartColumn 2 -AutoSize
+                    Write-LogMessage -Message "Updated Licensing sheet with user license information" -Type Success -LogOnly
                 }
             }
-            Write-LogMessage -Message "Updated Conditional Access sheet with policy status" -Type Success -LogOnly
+            catch {
+                Write-LogMessage -Message "Could not update Licensing sheet: $($_.Exception.Message)" -Type Warning -LogOnly
+            }
         }
         
-        # Add summary information to a new sheet or existing summary area
-        Add-TenantSummaryInfo -Excel $excel -TenantData $TenantData
+        # Add summary information using ImportExcel
+        try {
+            $summaryData = @()
+            $summaryData += [PSCustomObject]@{
+                'Summary' = 'TENANT CONFIGURATION SUMMARY'
+                'Value' = ''
+            }
+            $summaryData += [PSCustomObject]@{
+                'Summary' = "Generated: $($TenantData.TenantInfo.GeneratedDate)"
+                'Value' = ''
+            }
+            $summaryData += [PSCustomObject]@{
+                'Summary' = "Tenant Name: $($TenantData.TenantInfo.TenantName)"
+                'Value' = ''
+            }
+            $summaryData += [PSCustomObject]@{
+                'Summary' = "Default Domain: $($TenantData.TenantInfo.DefaultDomain)"
+                'Value' = ''
+            }
+            $summaryData += [PSCustomObject]@{
+                'Summary' = "Admin Email: $($TenantData.TenantInfo.AdminEmail)"
+                'Value' = ''
+            }
+            $summaryData += [PSCustomObject]@{
+                'Summary' = ''
+                'Value' = ''
+            }
+            $summaryData += [PSCustomObject]@{
+                'Summary' = 'CONFIGURATION COUNTS:'
+                'Value' = ''
+            }
+            $summaryData += [PSCustomObject]@{
+                'Summary' = "Users Created: $($TenantData.Users.Count)"
+                'Value' = ''
+            }
+            $summaryData += [PSCustomObject]@{
+                'Summary' = "Groups Created: $($TenantData.Groups.Count)"
+                'Value' = ''
+            }
+            $summaryData += [PSCustomObject]@{
+                'Summary' = "CA Policies: $($TenantData.ConditionalAccessPolicies.Count)"
+                'Value' = ''
+            }
+            $summaryData += [PSCustomObject]@{
+                'Summary' = "SharePoint Sites: $($TenantData.SharePointSites.Count)"
+                'Value' = ''
+            }
+            
+            # Add summary to Due Diligence sheet
+            $summaryData | Export-Excel -Path $ExcelPath -WorksheetName "M365 Due Dilligence" -StartRow 35 -StartColumn 2 -AutoSize
+            Write-LogMessage -Message "Added tenant summary information to documentation" -Type Success -LogOnly
+        }
+        catch {
+            Write-LogMessage -Message "Could not add summary information: $($_.Exception.Message)" -Type Warning -LogOnly
+        }
         
-        # Save the updated Excel file
-        Close-ExcelPackage $excel -Save
         Write-LogMessage -Message "Excel file updated and saved successfully" -Type Success
         
     } catch {
         Write-LogMessage -Message "Error updating Excel file: $($_.Exception.Message)" -Type Error
-        if ($excel) {
-            Close-ExcelPackage $excel -NoSave
-        }
         throw
     }
 }
 
-function Add-TenantSummaryInfo {
-    param(
-        [OfficeOpenXml.ExcelPackage]$Excel,
-        [hashtable]$TenantData
-    )
-    
-    try {
-        # Add summary to the first sheet or create a summary section
-        $sheet = $Excel.Workbook.Worksheets["M365 Due Dilligence"]
-        
-        if ($sheet) {
-            # Find empty area to add summary (around row 35-40)
-            $summaryRow = 35
-            
-            $sheet.Cells["B$summaryRow"].Value = "TENANT CONFIGURATION SUMMARY"
-            $sheet.Cells["B$summaryRow"].Style.Font.Bold = $true
-            $summaryRow++
-            
-            $sheet.Cells["B$summaryRow"].Value = "Generated: $($TenantData.TenantInfo.GeneratedDate)"
-            $summaryRow++
-            $sheet.Cells["B$summaryRow"].Value = "Tenant Name: $($TenantData.TenantInfo.TenantName)"
-            $summaryRow++
-            $sheet.Cells["B$summaryRow"].Value = "Default Domain: $($TenantData.TenantInfo.DefaultDomain)"
-            $summaryRow++
-            $sheet.Cells["B$summaryRow"].Value = "Admin Email: $($TenantData.TenantInfo.AdminEmail)"
-            $summaryRow++
-            $summaryRow++
-            
-            $sheet.Cells["B$summaryRow"].Value = "CONFIGURATION COUNTS:"
-            $sheet.Cells["B$summaryRow"].Style.Font.Bold = $true
-            $summaryRow++
-            $sheet.Cells["B$summaryRow"].Value = "Users Created: $($TenantData.Users.Count)"
-            $summaryRow++
-            $sheet.Cells["B$summaryRow"].Value = "Groups Created: $($TenantData.Groups.Count)"
-            $summaryRow++
-            $sheet.Cells["B$summaryRow"].Value = "CA Policies: $($TenantData.ConditionalAccessPolicies.Count)"
-            $summaryRow++
-            $sheet.Cells["B$summaryRow"].Value = "SharePoint Sites: $($TenantData.SharePointSites.Count)"
-            
-            Write-LogMessage -Message "Added tenant summary information to documentation" -Type Success -LogOnly
-        }
-    } catch {
-        Write-LogMessage -Message "Error adding summary information: $($_.Exception.Message)" -Type Warning -LogOnly
-    }
-}
+
 
 function Get-PolicyDescription {
     param([string]$PolicyName)
