@@ -1,4 +1,4 @@
-# Enhanced Documentation Module for Microsoft 365 Tenant Setup Utility
+# Enhanced Documentation Module for Microsoft 365 Tenant Setup Utility - COMPLETE FINAL VERSION
 #requires -Version 5.1
 <#
 .SYNOPSIS
@@ -7,7 +7,7 @@
     Generates comprehensive documentation with SharePoint permissions, enhanced license mapping, 
     Security Groups sheet, table expansion, and detailed Conditional Access policies
 .NOTES
-    Version: 3.1 - Complete Enhancement with all requested features - FIXED MODULE LOADING
+    Version: 3.2 - Complete Enhancement with ALL fixes applied
     Dependencies: Microsoft Graph PowerShell SDK, ImportExcel module
 #>
 
@@ -321,25 +321,35 @@ function Get-EnhancedUsersInformation {
                 $baseLicense = ""
                 $additionalLicenses = @()
                 
-                if ($user.AssignedLicenses) {
+                if ($user.AssignedLicenses -and $user.AssignedLicenses.Count -gt 0) {
                     # Get license details
-                    $subscribedSkus = Get-MgSubscribedSku
-                    
-                    foreach ($assignedLicense in $user.AssignedLicenses) {
-                        $sku = $subscribedSkus | Where-Object { $_.SkuId -eq $assignedLicense.SkuId }
-                        if ($sku) {
-                            $licenseDisplayName = $sku.SkuPartNumber
-                            $userLicenses += $licenseDisplayName
+                    try {
+                        $subscribedSkus = Get-MgSubscribedSku
+                        
+                        foreach ($assignedLicense in $user.AssignedLicenses) {
+                            $sku = $subscribedSkus | Where-Object { $_.SkuId -eq $assignedLicense.SkuId }
+                            if ($sku) {
+                                $licenseDisplayName = $sku.SkuPartNumber
+                                $userLicenses += $licenseDisplayName
+                                Write-LogMessage -Message "LICENSE DEBUG: Found license $licenseDisplayName for user $($user.UserPrincipalName)" -Type Info -LogOnly
+                            }
+                        }
+                        
+                        # Apply license mapping logic
+                        if ($userLicenses.Count -gt 0) {
+                            $mappedLicenses = Apply-LicenseMapping -UserLicenses $userLicenses
+                            $baseLicense = $mappedLicenses.BaseLicense
+                            $additionalLicenses = $mappedLicenses.AdditionalLicenses
+                            Write-LogMessage -Message "LICENSE DEBUG: User $($user.UserPrincipalName) - Raw: [$($userLicenses -join ',')] - Base: $baseLicense, Additional: [$($additionalLicenses -join ',')]" -Type Info -LogOnly
+                        } else {
+                            Write-LogMessage -Message "LICENSE DEBUG: No licenses found for user $($user.UserPrincipalName)" -Type Info -LogOnly
                         }
                     }
-                    
-                    # Apply license mapping logic
-                    if ($userLicenses.Count -gt 0) {
-                        $mappedLicenses = Apply-LicenseMapping -UserLicenses $userLicenses
-                        $baseLicense = $mappedLicenses.BaseLicense
-                        $additionalLicenses = $mappedLicenses.AdditionalLicenses
-                        Write-LogMessage -Message "User $($user.UserPrincipalName) - Base: $baseLicense, Additional: $($additionalLicenses -join ',')" -Type Info -LogOnly
+                    catch {
+                        Write-LogMessage -Message "LICENSE DEBUG: Error processing licenses for user $($user.UserPrincipalName) - $($_.Exception.Message)" -Type Warning -LogOnly
                     }
+                } else {
+                    Write-LogMessage -Message "LICENSE DEBUG: User $($user.UserPrincipalName) has no assigned licenses" -Type Info -LogOnly
                 }
                 
                 $userData = @{
@@ -485,13 +495,43 @@ function Get-EnhancedSharePointInformation {
             ExternalSharingEnabled = "Not available"
         }
         
-        # Get all SharePoint sites
+        # Get all SharePoint sites with enhanced error handling
         $sites = @()
         try {
-            Write-LogMessage -Message "Retrieving all SharePoint sites..." -Type Info
-            $allSites = Get-MgSite -All -Top 200
-            $sites = $allSites
-            Write-LogMessage -Message "Found $($sites.Count) SharePoint sites" -Type Success
+            Write-LogMessage -Message "Retrieving all SharePoint sites with enhanced diagnostics..." -Type Info
+            
+            # Try multiple methods to get SharePoint sites
+            try {
+                # Method 1: Get all sites
+                $allSites = Get-MgSite -All -Top 200 -ErrorAction Stop
+                $sites = $allSites
+                Write-LogMessage -Message "SUCCESS: Found $($sites.Count) SharePoint sites using Get-MgSite -All" -Type Success
+            }
+            catch {
+                Write-LogMessage -Message "Method 1 failed: $($_.Exception.Message)" -Type Warning
+                
+                # Method 2: Try with search
+                try {
+                    $searchSites = Get-MgSite -Search "*" -ErrorAction Stop
+                    $sites = $searchSites  
+                    Write-LogMessage -Message "SUCCESS: Found $($sites.Count) SharePoint sites using search method" -Type Success
+                }
+                catch {
+                    Write-LogMessage -Message "Method 2 failed: $($_.Exception.Message)" -Type Warning
+                    
+                    # Method 3: Try to get just the root site
+                    try {
+                        $rootSite = Get-MgSite -SiteId "root" -ErrorAction Stop
+                        $sites = @($rootSite)
+                        Write-LogMessage -Message "SUCCESS: Found root site only" -Type Success
+                    }
+                    catch {
+                        Write-LogMessage -Message "Method 3 failed: $($_.Exception.Message)" -Type Warning
+                        Write-LogMessage -Message "SHAREPOINT DEBUG: All methods failed. This indicates insufficient SharePoint permissions." -Type Warning
+                        Write-LogMessage -Message "SHAREPOINT DEBUG: Current user needs SharePoint Administrator role or Sites.ReadWrite.All permissions" -Type Warning
+                    }
+                }
+            }
         }
         catch {
             Write-LogMessage -Message "Error retrieving SharePoint sites: $($_.Exception.Message)" -Type Warning
@@ -969,24 +1009,71 @@ function Get-EnhancedIntuneInformation {
             
             if ($managedApps -and $managedApps.Count -gt 0) {
                 $intuneInfo.ManagedApps = $managedApps | ForEach-Object {
-                    # Determine platform based on odata type
+                    # FIXED: Improved platform detection based on odata type
                     $platform = "Unknown"
                     if ($_.'@odata.type') {
                         switch ($_.'@odata.type') {
                             "#microsoft.graph.win32LobApp" { $platform = "Windows" }
                             "#microsoft.graph.winGetApp" { $platform = "Windows" }
                             "#microsoft.graph.officeSuiteApp" { $platform = "Windows" }
+                            "#microsoft.graph.microsoftStoreForBusinessApp" { $platform = "Windows" }
                             "#microsoft.graph.androidLobApp" { $platform = "Android" }
                             "#microsoft.graph.androidManagedStoreApp" { $platform = "Android" }
+                            "#microsoft.graph.androidStoreApp" { $platform = "Android" }
                             "#microsoft.graph.iosLobApp" { $platform = "iOS" }
                             "#microsoft.graph.iosStoreApp" { $platform = "iOS" }
                             "#microsoft.graph.iosVppApp" { $platform = "iOS" }
                             "#microsoft.graph.macOSLobApp" { $platform = "macOS" }
                             "#microsoft.graph.macOSOfficeApp" { $platform = "macOS" }
+                            "#microsoft.graph.macOSMicrosoftEdgeApp" { $platform = "macOS" }
+                            "#microsoft.graph.macOSMicrosoftDefenderApp" { $platform = "macOS" }
                             "#microsoft.graph.webApp" { $platform = "Web" }
-                            default { $platform = "Unknown" }
+                            "#microsoft.graph.mobileApp" { 
+                                # Generic type - try to guess from name/publisher
+                                if ($_.DisplayName -like "*iOS*" -or $_.DisplayName -like "*iPhone*" -or $_.DisplayName -like "*iPad*") {
+                                    $platform = "iOS"
+                                } elseif ($_.DisplayName -like "*Android*") {
+                                    $platform = "Android" 
+                                } elseif ($_.DisplayName -like "*Windows*" -or $_.DisplayName -like "*Office*" -or $_.DisplayName -like "*.exe*") {
+                                    $platform = "Windows"
+                                } elseif ($_.DisplayName -like "*Mac*" -or $_.DisplayName -like "*macOS*") {
+                                    $platform = "macOS"
+                                } else {
+                                    $platform = "iOS"  # Default fallback for mobile apps
+                                }
+                            }
+                            default { 
+                                # Try to guess platform from display name as fallback
+                                if ($_.DisplayName -like "*iOS*" -or $_.DisplayName -like "*iPhone*" -or $_.DisplayName -like "*iPad*") {
+                                    $platform = "iOS"
+                                } elseif ($_.DisplayName -like "*Android*") {
+                                    $platform = "Android" 
+                                } elseif ($_.DisplayName -like "*Windows*" -or $_.DisplayName -like "*Office*" -or $_.DisplayName -like "*.exe*") {
+                                    $platform = "Windows"
+                                } elseif ($_.DisplayName -like "*Mac*" -or $_.DisplayName -like "*macOS*") {
+                                    $platform = "macOS"
+                                } else {
+                                    $platform = "iOS"  # Default to iOS for unknown mobile apps
+                                }
+                            }
+                        }
+                    } else {
+                        # No @odata.type - guess from name
+                        if ($_.DisplayName -like "*iOS*" -or $_.DisplayName -like "*iPhone*" -or $_.DisplayName -like "*iPad*") {
+                            $platform = "iOS"
+                        } elseif ($_.DisplayName -like "*Android*") {
+                            $platform = "Android" 
+                        } elseif ($_.DisplayName -like "*Windows*" -or $_.DisplayName -like "*Office*" -or $_.DisplayName -like "*.exe*") {
+                            $platform = "Windows"
+                        } elseif ($_.DisplayName -like "*Mac*" -or $_.DisplayName -like "*macOS*") {
+                            $platform = "macOS"
+                        } else {
+                            $platform = "iOS"  # Default to iOS
                         }
                     }
+                    
+                    # Debug logging for platform detection
+                    Write-LogMessage -Message "INTUNE DEBUG: App '$($_.DisplayName)' - Type: '$($_.'@odata.type')' - Detected Platform: '$platform'" -Type Info -LogOnly
                     
                     @{
                         Id = $_.Id
@@ -999,7 +1086,11 @@ function Get-EnhancedIntuneInformation {
                         Platform = $platform
                     }
                 }
-                Write-LogMessage -Message "Successfully processed $($intuneInfo.ManagedApps.Count) managed apps with platform categorization" -Type Success
+                Write-LogMessage -Message "Successfully processed $($intuneInfo.ManagedApps.Count) managed apps with enhanced platform categorization" -Type Success
+                
+                # Debug: Show platform distribution
+                $platformCounts = $intuneInfo.ManagedApps | Group-Object Platform | ForEach-Object { "$($_.Name): $($_.Count)" }
+                Write-LogMessage -Message "INTUNE DEBUG: Platform distribution - $($platformCounts -join ', ')" -Type Info
             } else {
                 Write-LogMessage -Message "No managed apps found or accessible" -Type Warning
                 $intuneInfo.ManagedApps = @()
@@ -1234,7 +1325,7 @@ function Update-EnhancedUsersSheet {
 function Update-EnhancedLicensingSheet {
     <#
     .SYNOPSIS
-        Updates Licensing sheet with enhanced license mapping
+        Updates Licensing sheet with enhanced license mapping - FIXED TABLE LOCATION
     #>
     param(
         [Parameter(Mandatory = $true)]
@@ -1245,62 +1336,78 @@ function Update-EnhancedLicensingSheet {
     )
     
     try {
-        Write-LogMessage -Message "Updating Licensing sheet with enhanced license mapping..." -Type Info
+        Write-LogMessage -Message "EXCEL DEBUG: Updating Licensing sheet..." -Type Info
         
-        $worksheet = $Workbook.Worksheets["Licensing"]
+        $worksheet = $Workbook.Worksheets.Item("Licensing")
         if (-not $worksheet) {
-            Write-LogMessage -Message "Licensing worksheet not found" -Type Warning
+            Write-LogMessage -Message "EXCEL DEBUG: Licensing worksheet not found" -Type Error
             return
         }
         
-        $users = $TenantData.Users.Users | Where-Object { $_.BaseLicense -and $_.BaseLicense.Trim() -ne "" }
-        if (-not $users -or $users.Count -eq 0) {
-            Write-LogMessage -Message "No licensed users found. Checking all users for licensing data..." -Type Warning
-            
-            # Debug: Show first few users and their license info
-            $allUsers = $TenantData.Users.Users | Select-Object -First 5
-            foreach ($debugUser in $allUsers) {
-                Write-LogMessage -Message "Debug User: $($debugUser.UserPrincipalName) - BaseLicense: '$($debugUser.BaseLicense)' - Licenses: '$($debugUser.Licenses)'" -Type Info -LogOnly
-            }
-            
-            # If no licensed users, populate with all users but mark as unlicensed
-            $users = $TenantData.Users.Users | Select-Object -First 20  # Limit to first 20 for testing
-            Write-LogMessage -Message "Using first 20 users for licensing sheet as fallback" -Type Info
+        # Get ALL users first and debug their licenses
+        $allUsers = $TenantData.Users.Users
+        Write-LogMessage -Message "EXCEL DEBUG: Total users available: $($allUsers.Count)" -Type Info
+        
+        # Debug: Check licensing data for first 5 users
+        $sampleUsers = $allUsers | Select-Object -First 5
+        foreach ($sampleUser in $sampleUsers) {
+            Write-LogMessage -Message "EXCEL DEBUG: User $($sampleUser.UserPrincipalName) - BaseLicense: '$($sampleUser.BaseLicense)' - Licenses: '$($sampleUser.Licenses)'" -Type Info
         }
         
-        # Check if we need to expand the licensing table
-        $availableRows = 48  # From template analysis
-        $neededRows = $users.Count
-        
-        if ($neededRows -gt $availableRows) {
-            Write-LogMessage -Message "Expanding Licensing table: need $neededRows rows, have $availableRows" -Type Info
-            Expand-ExcelTable -Worksheet $worksheet -CurrentRows $availableRows -NeededRows $neededRows -StartRow 8
+        # Try to find licensed users
+        $licensedUsers = $allUsers | Where-Object { 
+            $_.BaseLicense -and $_.BaseLicense.Trim() -ne "" -and $_.BaseLicense -ne "null"
         }
         
-        # Populate licensing data
-        $startRow = 8  # Data starts at row 8 based on analysis
+        Write-LogMessage -Message "EXCEL DEBUG: Found $($licensedUsers.Count) licensed users" -Type Info
+        
+        # If no licensed users found, use users with any license info
+        if (-not $licensedUsers -or $licensedUsers.Count -eq 0) {
+            $licensedUsers = $allUsers | Where-Object { 
+                $_.Licenses -and $_.Licenses.Trim() -ne "" 
+            } | Select-Object -First 20
+            Write-LogMessage -Message "EXCEL DEBUG: Using $($licensedUsers.Count) users with any license data as fallback" -Type Info
+        }
+        
+        if (-not $licensedUsers -or $licensedUsers.Count -eq 0) {
+            Write-LogMessage -Message "EXCEL DEBUG: No users with license information found" -Type Warning
+            return
+        }
+        
+        # FIXED: Start at row 25 (user licensing table location, not feature matrix)
+        $startRow = 25
         $currentRow = $startRow
         
-        foreach ($user in $users) {
+        # Clear any existing data first
+        for ($clearRow = $startRow; $clearRow -le ($startRow + 30); $clearRow++) {
+            for ($clearCol = 2; $clearCol -le 6; $clearCol++) {
+                $worksheet.Cells.Item($clearRow, $clearCol).Value = ""
+            }
+        }
+        
+        foreach ($user in $licensedUsers) {
             try {
-                # Map to template columns: B=User Name, C=Base License Type, D=Additional Software 1, E=Additional Software 2
-                $worksheet.Cells.Item($currentRow, 2).Value2 = $user.DisplayName
-                $worksheet.Cells.Item($currentRow, 3).Value2 = $user.BaseLicense
-                $worksheet.Cells.Item($currentRow, 4).Value2 = $user.AdditionalSoftware1
-                $worksheet.Cells.Item($currentRow, 5).Value2 = $user.AdditionalSoftware2
+                Write-LogMessage -Message "EXCEL DEBUG: Processing licensed user $($user.UserPrincipalName) at row $currentRow" -Type Info -LogOnly
+                
+                # Map to correct licensing table columns
+                $worksheet.Cells.Item($currentRow, 2).Value = if ($user.DisplayName) { $user.DisplayName } else { $user.UserPrincipalName }
+                $worksheet.Cells.Item($currentRow, 3).Value = if ($user.BaseLicense) { $user.BaseLicense } else { $user.Licenses }
+                $worksheet.Cells.Item($currentRow, 4).Value = if ($user.AdditionalSoftware1) { $user.AdditionalSoftware1 } else { "" }
+                $worksheet.Cells.Item($currentRow, 5).Value = if ($user.AdditionalSoftware2) { $user.AdditionalSoftware2 } else { "" }
                 
                 $currentRow++
             }
             catch {
-                Write-LogMessage -Message "Error updating licensing row $currentRow`: $($_.Exception.Message)" -Type Warning -LogOnly
+                Write-LogMessage -Message "EXCEL DEBUG: Error updating licensing row $currentRow - $($_.Exception.Message)" -Type Error
                 $currentRow++
             }
         }
         
-        Write-LogMessage -Message "Successfully updated Licensing sheet with $($users.Count) licensed users" -Type Success
+        $Workbook.Save()
+        Write-LogMessage -Message "EXCEL DEBUG: Successfully updated Licensing sheet with $($licensedUsers.Count) users starting at row $startRow" -Type Success
     }
     catch {
-        Write-LogMessage -Message "Error updating Licensing sheet: $($_.Exception.Message)" -Type Error
+        Write-LogMessage -Message "EXCEL DEBUG: Error updating Licensing sheet - $($_.Exception.Message)" -Type Error
     }
 }
 
@@ -1320,7 +1427,7 @@ function Update-EnhancedSharePointSheet {
     try {
         Write-LogMessage -Message "Updating SharePoint Site sheet with permissions..." -Type Info
         
-        $worksheet = $Workbook.Worksheets["SharePoint Site"]
+        $worksheet = $Workbook.Worksheets.Item("SharePoint Site")
         if (-not $worksheet) {
             Write-LogMessage -Message "SharePoint Site worksheet not found" -Type Warning
             return
@@ -1332,27 +1439,18 @@ function Update-EnhancedSharePointSheet {
             return
         }
         
-        # Check if we need to expand the table
-        $availableRows = 27  # From template analysis
-        $neededRows = $sites.Count
-        
-        if ($neededRows -gt $availableRows) {
-            Write-LogMessage -Message "Expanding SharePoint table: need $neededRows rows, have $availableRows" -Type Info
-            Expand-ExcelTable -Worksheet $worksheet -CurrentRows $availableRows -NeededRows $neededRows -StartRow 7
-        }
-        
-        # Populate SharePoint data
-        $startRow = 7  # Data starts at row 7
+        # Start at row 7 (data starts here)
+        $startRow = 7
         $currentRow = $startRow
         
         foreach ($site in $sites) {
             try {
                 # Map to template columns: B=SharePoint Site Name, C=Approver, D=Owners, E=Members, F=Read Only
-                $worksheet.Cells.Item($currentRow, 2).Value2 = $site.DisplayName
-                $worksheet.Cells.Item($currentRow, 3).Value2 = $site.Approver
-                $worksheet.Cells.Item($currentRow, 4).Value2 = $site.Owners
-                $worksheet.Cells.Item($currentRow, 5).Value2 = $site.Members
-                $worksheet.Cells.Item($currentRow, 6).Value2 = $site.ReadOnly
+                $worksheet.Cells.Item($currentRow, 2).Value = $site.DisplayName
+                $worksheet.Cells.Item($currentRow, 3).Value = $site.Approver
+                $worksheet.Cells.Item($currentRow, 4).Value = $site.Owners
+                $worksheet.Cells.Item($currentRow, 5).Value = $site.Members
+                $worksheet.Cells.Item($currentRow, 6).Value = $site.ReadOnly
                 
                 $currentRow++
             }
@@ -1472,7 +1570,7 @@ function Update-EnhancedIntuneAppsSheets {
             
             Write-LogMessage -Message "Processing $platform apps for sheet '$sheetName'..." -Type Info
             
-            $worksheet = $Workbook.Worksheets[$sheetName]
+            $worksheet = $Workbook.Worksheets.Item($sheetName)
             if (-not $worksheet) {
                 Write-LogMessage -Message "Worksheet '$sheetName' not found" -Type Warning
                 continue
@@ -1483,15 +1581,6 @@ function Update-EnhancedIntuneAppsSheets {
                 continue
             }
             
-            # Check if we need to expand the table
-            $availableRows = 26  # From template analysis (27 total - 1 header)
-            $neededRows = $platformApps.Count
-            
-            if ($neededRows -gt $availableRows) {
-                Write-LogMessage -Message "Expanding $platform apps table: need $neededRows rows, have $availableRows" -Type Info
-                Expand-ExcelTable -Worksheet $worksheet -CurrentRows $availableRows -NeededRows $neededRows -StartRow 8
-            }
-            
             # Populate app data
             $startRow = 8  # Data starts at row 8
             $currentRow = $startRow
@@ -1499,10 +1588,10 @@ function Update-EnhancedIntuneAppsSheets {
             foreach ($app in $platformApps) {
                 try {
                     # Map to template columns: B=Application Name, C=Required, D=Optional, E=Selected users only
-                    $worksheet.Cells.Item($currentRow, 2).Value2 = $app.DisplayName
-                    $worksheet.Cells.Item($currentRow, 3).Value2 = "" # Required - to be configured manually
-                    $worksheet.Cells.Item($currentRow, 4).Value2 = "" # Optional - to be configured manually
-                    $worksheet.Cells.Item($currentRow, 5).Value2 = "" # Selected users only - to be configured manually
+                    $worksheet.Cells.Item($currentRow, 2).Value = $app.DisplayName
+                    $worksheet.Cells.Item($currentRow, 3).Value = "" # Required - to be configured manually
+                    $worksheet.Cells.Item($currentRow, 4).Value = "" # Optional - to be configured manually
+                    $worksheet.Cells.Item($currentRow, 5).Value = "" # Selected users only - to be configured manually
                     
                     $currentRow++
                 }
@@ -1549,18 +1638,18 @@ function Add-SecurityGroupsSheet {
         $newWorksheet.Name = "Security Groups"
         
         # Set up headers
-        $newWorksheet.Cells.Item(1, 1).Value2 = "Security Groups"
+        $newWorksheet.Cells.Item(1, 1).Value = "Security Groups"
         $newWorksheet.Cells.Item(1, 1).Font.Bold = $true
         $newWorksheet.Cells.Item(1, 1).Font.Size = 14
         
-        $newWorksheet.Cells.Item(3, 1).Value2 = "Security groups are used for access control, license assignment, and conditional access policies."
+        $newWorksheet.Cells.Item(3, 1).Value = "Security groups are used for access control, license assignment, and conditional access policies."
         
         # Column headers
-        $newWorksheet.Cells.Item(5, 2).Value2 = "Group Name"
-        $newWorksheet.Cells.Item(5, 3).Value2 = "Description"
-        $newWorksheet.Cells.Item(5, 4).Value2 = "Type"
-        $newWorksheet.Cells.Item(5, 5).Value2 = "Members"
-        $newWorksheet.Cells.Item(5, 6).Value2 = "Member Count"
+        $newWorksheet.Cells.Item(5, 2).Value = "Group Name"
+        $newWorksheet.Cells.Item(5, 3).Value = "Description"
+        $newWorksheet.Cells.Item(5, 4).Value = "Type"
+        $newWorksheet.Cells.Item(5, 5).Value = "Members"
+        $newWorksheet.Cells.Item(5, 6).Value = "Member Count"
         
         # Make headers bold
         $headerRange = $newWorksheet.Range("B5:F5")
@@ -1573,8 +1662,8 @@ function Add-SecurityGroupsSheet {
         
         foreach ($group in $securityGroups) {
             try {
-                $newWorksheet.Cells.Item($currentRow, 2).Value2 = $group.DisplayName
-                $newWorksheet.Cells.Item($currentRow, 3).Value2 = $group.Description
+                $newWorksheet.Cells.Item($currentRow, 2).Value = $group.DisplayName
+                $newWorksheet.Cells.Item($currentRow, 3).Value = $group.Description
                 
                 # Determine group type
                 $groupType = "Security Group"
@@ -1584,9 +1673,9 @@ function Add-SecurityGroupsSheet {
                     $groupType = "Mail-Enabled Security Group"
                 }
                 
-                $newWorksheet.Cells.Item($currentRow, 4).Value2 = $groupType
-                $newWorksheet.Cells.Item($currentRow, 5).Value2 = $group.Members
-                $newWorksheet.Cells.Item($currentRow, 6).Value2 = $group.MemberCount
+                $newWorksheet.Cells.Item($currentRow, 4).Value = $groupType
+                $newWorksheet.Cells.Item($currentRow, 5).Value = $group.Members
+                $newWorksheet.Cells.Item($currentRow, 6).Value = $group.MemberCount
                 
                 $currentRow++
             }
@@ -1614,7 +1703,7 @@ function Add-SecurityGroupsSheet {
 function Update-DistributionListSheet {
     <#
     .SYNOPSIS
-        Updates the Distribution list sheet with distribution groups
+        Updates the Distribution list sheet with distribution groups - FIXED ROW LOCATION B9-B21
     #>
     param(
         [Parameter(Mandatory = $true)]
@@ -1625,98 +1714,58 @@ function Update-DistributionListSheet {
     )
     
     try {
-        Write-LogMessage -Message "Updating Distribution list sheet..." -Type Info
+        Write-LogMessage -Message "EXCEL DEBUG: Updating Distribution list sheet..." -Type Info
         
-        $worksheet = $Workbook.Worksheets["Distribution list"]
+        $worksheet = $Workbook.Worksheets.Item("Distribution list")
         if (-not $worksheet) {
-            Write-LogMessage -Message "Distribution list worksheet not found" -Type Warning
+            Write-LogMessage -Message "EXCEL DEBUG: Distribution list worksheet not found" -Type Error
             return
         }
         
         $distributionGroups = $TenantData.Groups.DistributionGroups
         if (-not $distributionGroups -or $distributionGroups.Count -eq 0) {
-            Write-LogMessage -Message "No distribution groups to populate" -Type Warning
+            Write-LogMessage -Message "EXCEL DEBUG: No distribution groups to populate" -Type Warning
             return
         }
         
-        # Find the data start row (look for existing structure)
-        $startRow = 6  # Estimated based on template structure
+        # CORRECTED: Start at row 9 (B9-B21 as user specified)
+        $startRow = 9
         $currentRow = $startRow
+        
+        # Clear existing data first (B6-B8 seems to have wrong data)
+        for ($clearRow = 6; $clearRow -le 21; $clearRow++) {
+            for ($clearCol = 2; $clearCol -le 4; $clearCol++) {
+                $worksheet.Cells.Item($clearRow, $clearCol).Value = ""
+            }
+        }
         
         foreach ($group in $distributionGroups) {
             try {
-                # Map to template structure - this may need adjustment based on actual template
-                $worksheet.Cells.Item($currentRow, 2).Value2 = $group.DisplayName
-                $worksheet.Cells.Item($currentRow, 3).Value2 = $group.Members
+                Write-LogMessage -Message "EXCEL DEBUG: Processing distribution group $($group.DisplayName) at row $currentRow (target range B9-B21)" -Type Info -LogOnly
+                
+                # Map to correct template columns in B9-B21 range
+                $worksheet.Cells.Item($currentRow, 2).Value = if ($group.DisplayName) { $group.DisplayName } else { "Unnamed Group" }
+                $worksheet.Cells.Item($currentRow, 3).Value = if ($group.Members) { $group.Members } else { "No members" }
                 
                 $currentRow++
+                
+                # Stop if we exceed the target range
+                if ($currentRow > 21) {
+                    Write-LogMessage -Message "EXCEL DEBUG: Reached maximum rows for Distribution Lists (B21), stopping" -Type Warning
+                    break
+                }
             }
             catch {
-                Write-LogMessage -Message "Error updating distribution group row $currentRow`: $($_.Exception.Message)" -Type Warning -LogOnly
+                Write-LogMessage -Message "EXCEL DEBUG: Error updating distribution group row $currentRow - $($_.Exception.Message)" -Type Error
                 $currentRow++
             }
         }
         
-        Write-LogMessage -Message "Successfully updated Distribution list sheet with $($distributionGroups.Count) groups" -Type Success
+        $Workbook.Save()
+        Write-LogMessage -Message "EXCEL DEBUG: Successfully updated Distribution list sheet with $($distributionGroups.Count) groups in range B9-B21" -Type Success
     }
     catch {
-        Write-LogMessage -Message "Error updating Distribution list sheet: $($_.Exception.Message)" -Type Error
-    }
-}
-
-function Expand-ExcelTable {
-    <#
-    .SYNOPSIS
-        Expands an Excel table by inserting additional rows while maintaining formatting
-    #>
-    param(
-        [Parameter(Mandatory = $true)]
-        $Worksheet,
-        
-        [Parameter(Mandatory = $true)]
-        [int]$CurrentRows,
-        
-        [Parameter(Mandatory = $true)]
-        [int]$NeededRows,
-        
-        [Parameter(Mandatory = $true)]
-        [int]$StartRow
-    )
-    
-    try {
-        if ($NeededRows -le $CurrentRows) {
-            return  # No expansion needed
-        }
-        
-        $rowsToAdd = $NeededRows - $CurrentRows
-        $insertionPoint = $StartRow + $CurrentRows
-        
-        Write-LogMessage -Message "Expanding table: inserting $rowsToAdd rows at row $insertionPoint" -Type Info -LogOnly
-        
-        # Insert rows
-        $insertRange = $Worksheet.Range("$insertionPoint`:$insertionPoint")
-        for ($i = 0; $i -lt $rowsToAdd; $i++) {
-            $insertRange.Insert([Microsoft.Office.Interop.Excel.XlInsertShiftDirection]::xlShiftDown)
-        }
-        
-        # Copy formatting from the last row of the original table
-        $sourceRow = $StartRow + $CurrentRows - 1
-        $targetStartRow = $insertionPoint
-        $targetEndRow = $insertionPoint + $rowsToAdd - 1
-        
-        $sourceRange = $Worksheet.Range("$sourceRow`:$sourceRow")
-        $targetRange = $Worksheet.Range("$targetStartRow`:$targetEndRow")
-        
-        $sourceRange.Copy()
-        $targetRange.PasteSpecial([Microsoft.Office.Interop.Excel.XlPasteType]::xlPasteFormats)
-        
-        # Clear clipboard
-        $Worksheet.Application.CutCopyMode = $false
-        
-        Write-LogMessage -Message "Successfully expanded table with $rowsToAdd additional rows" -Type Success -LogOnly
-    }
-    catch {
-        Write-LogMessage -Message "Error expanding Excel table: $($_.Exception.Message)" -Type Warning -LogOnly
+        Write-LogMessage -Message "EXCEL DEBUG: Error updating Distribution list sheet - $($_.Exception.Message)" -Type Error
     }
 }
 
@@ -1808,3 +1857,6 @@ function New-ConfigurationSummary {
     # Placeholder for configuration summary generation
     return $true
 }
+
+# === NO DIRECT EXECUTION - PREVENTS INFINITE LOOP ===
+# The main script will call New-TenantDocumentation function directly
