@@ -7,7 +7,7 @@
     Generates comprehensive documentation with SharePoint permissions, enhanced license mapping, 
     Security Groups sheet, table expansion, and detailed Conditional Access policies
 .NOTES
-    Version: 3.0 - Complete Enhancement with all requested features
+    Version: 3.1 - Complete Enhancement with all requested features - FIXED MODULE LOADING
     Dependencies: Microsoft Graph PowerShell SDK, ImportExcel module
 #>
 
@@ -77,14 +77,13 @@ function New-TenantDocumentation {
             # Ignore disconnect errors
         }
         
-        # STEP 5: Force load ONLY the exact modules needed for Enhanced Documentation
+        # STEP 5: Force load ONLY the exact modules needed for Enhanced Documentation - FIXED
         $documentationModules = @(
             'Microsoft.Graph.Groups',
             'Microsoft.Graph.Identity.DirectoryManagement', 
             'Microsoft.Graph.Users',
             'Microsoft.Graph.Sites',
             'Microsoft.Graph.DeviceManagement',
-            'Microsoft.Graph.DeviceManagement.Enrolment',
             'Microsoft.Graph.Identity.SignIns',
             'Microsoft.Graph.Applications',
             'Microsoft.Graph.Teams'
@@ -1112,9 +1111,7 @@ function New-EnhancedExcelDocumentation {
     }
 }
 
-# Continue with the enhanced update functions...
-# Enhanced Excel Update Functions for Documentation Module
-# These functions handle the enhanced Excel population with table expansion and new features
+# === Enhanced Excel Update Functions ===
 
 function Update-EnhancedUsersSheet {
     <#
