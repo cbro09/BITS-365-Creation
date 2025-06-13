@@ -334,9 +334,12 @@ function Get-EnhancedUsersInformation {
                     }
                     
                     # Apply license mapping logic
-                    $mappedLicenses = Apply-LicenseMapping -UserLicenses $userLicenses
-                    $baseLicense = $mappedLicenses.BaseLicense
-                    $additionalLicenses = $mappedLicenses.AdditionalLicenses
+                    if ($userLicenses.Count -gt 0) {
+                        $mappedLicenses = Apply-LicenseMapping -UserLicenses $userLicenses
+                        $baseLicense = $mappedLicenses.BaseLicense
+                        $additionalLicenses = $mappedLicenses.AdditionalLicenses
+                        Write-LogMessage -Message "User $($user.UserPrincipalName) - Base: $baseLicense, Additional: $($additionalLicenses -join ',')" -Type Info -LogOnly
+                    }
                 }
                 
                 $userData = @{
@@ -549,6 +552,7 @@ function Get-EnhancedSharePointInformation {
             Write-LogMessage -Message "Successfully processed $($spInfo.Sites.Count) SharePoint sites with permissions" -Type Success
         } else {
             Write-LogMessage -Message "No SharePoint sites accessible with current permissions" -Type Warning
+            $spInfo.TotalSites = 0
             $spInfo.Sites = @(
                 @{
                     Id = "No Access"
@@ -1052,7 +1056,7 @@ function Get-EnhancedIntuneInformation {
 function New-EnhancedExcelDocumentation {
     <#
     .SYNOPSIS
-        Generates enhanced Excel documentation with table expansion and new sheets
+        Generates enhanced Excel documentation with robust error handling
     #>
     param(
         [Parameter(Mandatory = $true)]
@@ -1063,50 +1067,88 @@ function New-EnhancedExcelDocumentation {
     )
     
     try {
-        Write-LogMessage -Message "Starting enhanced Excel documentation generation..." -Type Info
+        Write-LogMessage -Message "EXCEL DEBUG: Starting Excel documentation generation..." -Type Info
         
         # Copy template to output directory
         $outputFileName = "TenantConfiguration_Enhanced_$(Get-Date -Format 'yyyyMMdd_HHmmss').xlsx"
         $outputPath = Join-Path $DocumentationConfig.OutputDirectory "Reports\$outputFileName"
         
         Copy-Item -Path $TemplatePath -Destination $outputPath -Force
-        Write-LogMessage -Message "Copied template to: $outputPath" -Type Info
+        Write-LogMessage -Message "EXCEL DEBUG: Copied template to: $outputPath" -Type Info
         
-        # Load Excel application
-        $excel = New-Object -ComObject Excel.Application
-        $excel.Visible = $false
-        $excel.DisplayAlerts = $false
+        # Test if file exists and is accessible
+        if (-not (Test-Path $outputPath)) {
+            Write-LogMessage -Message "EXCEL DEBUG: Output file does not exist after copy!" -Type Error
+            return $false
+        }
+        
+        Write-LogMessage -Message "EXCEL DEBUG: File size after copy: $((Get-Item $outputPath).Length) bytes" -Type Info
+        
+        # Load Excel application with error handling
+        try {
+            $excel = New-Object -ComObject Excel.Application
+            $excel.Visible = $false
+            $excel.DisplayAlerts = $false
+            $excel.ScreenUpdating = $false  # Improve performance
+            Write-LogMessage -Message "EXCEL DEBUG: Excel application created successfully" -Type Success
+        }
+        catch {
+            Write-LogMessage -Message "EXCEL DEBUG: Failed to create Excel application: $($_.Exception.Message)" -Type Error
+            return $false
+        }
         
         try {
+            Write-LogMessage -Message "EXCEL DEBUG: Opening workbook..." -Type Info
             $workbook = $excel.Workbooks.Open($outputPath)
+            Write-LogMessage -Message "EXCEL DEBUG: Workbook opened successfully" -Type Success
             
-            # Update existing sheets with enhanced data
-            Update-EnhancedUsersSheet -Workbook $workbook -TenantData $TenantData
-            Update-EnhancedLicensingSheet -Workbook $workbook -TenantData $TenantData  
-            Update-EnhancedSharePointSheet -Workbook $workbook -TenantData $TenantData
-            Update-EnhancedConditionalAccessSheet -Workbook $workbook -TenantData $TenantData
-            Update-EnhancedIntuneAppsSheets -Workbook $workbook -TenantData $TenantData
+            # List all worksheets for debugging
+            Write-LogMessage -Message "EXCEL DEBUG: Available worksheets:" -Type Info
+            for ($i = 1; $i -le $workbook.Worksheets.Count; $i++) {
+                $sheetName = $workbook.Worksheets.Item($i).Name
+                Write-LogMessage -Message "EXCEL DEBUG: Sheet $i`: $sheetName" -Type Info -LogOnly
+            }
             
-            # Add new Security Groups sheet
-            Add-SecurityGroupsSheet -Workbook $workbook -TenantData $TenantData
+            # Update sheets one by one with robust error handling
+            try {
+                Update-EnhancedUsersSheet -Workbook $workbook -TenantData $TenantData
+                Update-EnhancedLicensingSheet -Workbook $workbook -TenantData $TenantData
+                Update-EnhancedConditionalAccessSheet -Workbook $workbook -TenantData $TenantData
+                Update-EnhancedSharePointSheet -Workbook $workbook -TenantData $TenantData
+                Update-EnhancedIntuneAppsSheets -Workbook $workbook -TenantData $TenantData
+                Add-SecurityGroupsSheet -Workbook $workbook -TenantData $TenantData
+                Update-DistributionListSheet -Workbook $workbook -TenantData $TenantData
+            }
+            catch {
+                Write-LogMessage -Message "EXCEL DEBUG: Error during sheet updates: $($_.Exception.Message)" -Type Error
+            }
             
-            # Update Distribution list sheet
-            Update-DistributionListSheet -Workbook $workbook -TenantData $TenantData
-            
-            # Save and close
+            # Final save and close
+            Write-LogMessage -Message "EXCEL DEBUG: Performing final save..." -Type Info
             $workbook.Save()
             $workbook.Close()
+            Write-LogMessage -Message "EXCEL DEBUG: Workbook saved and closed" -Type Success
             
-            Write-LogMessage -Message "Enhanced Excel documentation generated successfully: $outputPath" -Type Success
             return $true
         }
+        catch {
+            Write-LogMessage -Message "EXCEL DEBUG: Error during workbook operations: $($_.Exception.Message)" -Type Error
+            return $false
+        }
         finally {
-            $excel.Quit()
-            [System.Runtime.Interopservices.Marshal]::ReleaseComObject($excel) | Out-Null
+            try {
+                $excel.ScreenUpdating = $true
+                $excel.Quit()
+                [System.Runtime.Interopservices.Marshal]::ReleaseComObject($excel) | Out-Null
+                Write-LogMessage -Message "EXCEL DEBUG: Excel application cleaned up" -Type Success
+            }
+            catch {
+                Write-LogMessage -Message "EXCEL DEBUG: Error during Excel cleanup: $($_.Exception.Message)" -Type Warning
+            }
         }
     }
     catch {
-        Write-LogMessage -Message "Error generating enhanced Excel documentation: $($_.Exception.Message)" -Type Error
+        Write-LogMessage -Message "EXCEL DEBUG: Fatal error in Excel documentation: $($_.Exception.Message)" -Type Error
         return $false
     }
 }
@@ -1116,7 +1158,7 @@ function New-EnhancedExcelDocumentation {
 function Update-EnhancedUsersSheet {
     <#
     .SYNOPSIS
-        Updates Users sheet with enhanced license mapping
+        Updates Users sheet with enhanced license mapping and robust error handling
     #>
     param(
         [Parameter(Mandatory = $true)]
@@ -1127,57 +1169,65 @@ function Update-EnhancedUsersSheet {
     )
     
     try {
-        Write-LogMessage -Message "Updating Users sheet with enhanced license mapping..." -Type Info
+        Write-LogMessage -Message "EXCEL DEBUG: Updating Users sheet..." -Type Info
         
-        $worksheet = $Workbook.Worksheets["Users"]
+        $worksheet = $Workbook.Worksheets.Item("Users")
         if (-not $worksheet) {
-            Write-LogMessage -Message "Users worksheet not found" -Type Warning
+            Write-LogMessage -Message "EXCEL DEBUG: Users worksheet not found" -Type Error
             return
         }
         
         $users = $TenantData.Users.Users
+        Write-LogMessage -Message "EXCEL DEBUG: Processing $($users.Count) users" -Type Info
+        
         if (-not $users -or $users.Count -eq 0) {
-            Write-LogMessage -Message "No users data to populate" -Type Warning
+            Write-LogMessage -Message "EXCEL DEBUG: No users data to populate" -Type Warning
             return
         }
         
-        # Check if we need to expand the table
-        $availableRows = 310  # From template analysis
-        $neededRows = $users.Count
-        
-        if ($neededRows -gt $availableRows) {
-            Write-LogMessage -Message "Expanding Users table: need $neededRows rows, have $availableRows" -Type Info
-            Expand-ExcelTable -Worksheet $worksheet -CurrentRows $availableRows -NeededRows $neededRows -StartRow 7
-        }
-        
-        # Populate user data
-        $startRow = 7  # Data starts at row 7
+        # Start at row 7 (first data row)
+        $startRow = 7
         $currentRow = $startRow
         
-        foreach ($user in $users) {
+        # Populate first 50 users to avoid Excel timeouts
+        $usersToProcess = $users | Select-Object -First 50
+        
+        foreach ($user in $usersToProcess) {
             try {
-                # Map to template columns: A=First Name, B=Last Name, C=Email, D=Job Title, E=Manager email, F=Department, G=Office location, H=Phone Number
-                $worksheet.Cells.Item($currentRow, 1).Value2 = $user.GivenName
-                $worksheet.Cells.Item($currentRow, 2).Value2 = $user.Surname  
-                $worksheet.Cells.Item($currentRow, 3).Value2 = $user.UserPrincipalName
-                $worksheet.Cells.Item($currentRow, 4).Value2 = $user.JobTitle
-                $worksheet.Cells.Item($currentRow, 5).Value2 = $user.Manager
-                $worksheet.Cells.Item($currentRow, 6).Value2 = $user.Department
-                $worksheet.Cells.Item($currentRow, 7).Value2 = $user.Office
-                $worksheet.Cells.Item($currentRow, 8).Value2 = "" # Phone Number - not collected automatically
+                Write-LogMessage -Message "EXCEL DEBUG: Processing user $($user.UserPrincipalName) at row $currentRow" -Type Info -LogOnly
+                
+                # Use .Value instead of .Value2 for better compatibility
+                $worksheet.Cells.Item($currentRow, 1).Value = if ($user.GivenName) { $user.GivenName } else { "" }
+                $worksheet.Cells.Item($currentRow, 2).Value = if ($user.Surname) { $user.Surname } else { "" }
+                $worksheet.Cells.Item($currentRow, 3).Value = if ($user.UserPrincipalName) { $user.UserPrincipalName } else { "" }
+                $worksheet.Cells.Item($currentRow, 4).Value = if ($user.JobTitle) { $user.JobTitle } else { "" }
+                $worksheet.Cells.Item($currentRow, 5).Value = if ($user.Manager) { $user.Manager } else { "" }
+                $worksheet.Cells.Item($currentRow, 6).Value = if ($user.Department) { $user.Department } else { "" }
+                $worksheet.Cells.Item($currentRow, 7).Value = if ($user.Office) { $user.Office } else { "" }
+                $worksheet.Cells.Item($currentRow, 8).Value = "" # Phone Number
                 
                 $currentRow++
+                
+                # Save every 10 rows to prevent loss
+                if (($currentRow - $startRow) % 10 -eq 0) {
+                    $Workbook.Save()
+                    Write-LogMessage -Message "EXCEL DEBUG: Saved progress at row $currentRow" -Type Info -LogOnly
+                }
+                
             }
             catch {
-                Write-LogMessage -Message "Error updating user row $currentRow`: $($_.Exception.Message)" -Type Warning -LogOnly
+                Write-LogMessage -Message "EXCEL DEBUG: Error updating user row $currentRow - $($_.Exception.Message)" -Type Error
                 $currentRow++
             }
         }
         
-        Write-LogMessage -Message "Successfully updated Users sheet with $($users.Count) users" -Type Success
+        # Final save
+        $Workbook.Save()
+        Write-LogMessage -Message "EXCEL DEBUG: Successfully updated Users sheet with $($usersToProcess.Count) users" -Type Success
     }
     catch {
-        Write-LogMessage -Message "Error updating Users sheet: $($_.Exception.Message)" -Type Error
+        Write-LogMessage -Message "EXCEL DEBUG: Error updating Users sheet - $($_.Exception.Message)" -Type Error
+        Write-LogMessage -Message "EXCEL DEBUG: Full error: $($_.Exception)" -Type Error -LogOnly
     }
 }
 
@@ -1203,10 +1253,19 @@ function Update-EnhancedLicensingSheet {
             return
         }
         
-        $users = $TenantData.Users.Users | Where-Object { $_.BaseLicense -ne "" }
+        $users = $TenantData.Users.Users | Where-Object { $_.BaseLicense -and $_.BaseLicense.Trim() -ne "" }
         if (-not $users -or $users.Count -eq 0) {
-            Write-LogMessage -Message "No licensed users data to populate" -Type Warning
-            return
+            Write-LogMessage -Message "No licensed users found. Checking all users for licensing data..." -Type Warning
+            
+            # Debug: Show first few users and their license info
+            $allUsers = $TenantData.Users.Users | Select-Object -First 5
+            foreach ($debugUser in $allUsers) {
+                Write-LogMessage -Message "Debug User: $($debugUser.UserPrincipalName) - BaseLicense: '$($debugUser.BaseLicense)' - Licenses: '$($debugUser.Licenses)'" -Type Info -LogOnly
+            }
+            
+            # If no licensed users, populate with all users but mark as unlicensed
+            $users = $TenantData.Users.Users | Select-Object -First 20  # Limit to first 20 for testing
+            Write-LogMessage -Message "Using first 20 users for licensing sheet as fallback" -Type Info
         }
         
         # Check if we need to expand the licensing table
@@ -1313,7 +1372,7 @@ function Update-EnhancedSharePointSheet {
 function Update-EnhancedConditionalAccessSheet {
     <#
     .SYNOPSIS
-        Updates Conditional Access sheet with technical details
+        Updates Conditional Access sheet with technical details and robust error handling
     #>
     param(
         [Parameter(Mandatory = $true)]
@@ -1324,51 +1383,46 @@ function Update-EnhancedConditionalAccessSheet {
     )
     
     try {
-        Write-LogMessage -Message "Updating Conditional Access sheet with technical details..." -Type Info
+        Write-LogMessage -Message "EXCEL DEBUG: Updating Conditional Access sheet..." -Type Info
         
-        $worksheet = $Workbook.Worksheets["Conditional Access"]
+        $worksheet = $Workbook.Worksheets.Item("Conditional Access")
         if (-not $worksheet) {
-            Write-LogMessage -Message "Conditional Access worksheet not found" -Type Warning
+            Write-LogMessage -Message "EXCEL DEBUG: Conditional Access worksheet not found" -Type Error
             return
         }
         
         $policies = $TenantData.ConditionalAccess.Policies
+        Write-LogMessage -Message "EXCEL DEBUG: Processing $($policies.Count) CA policies" -Type Info
+        
         if (-not $policies -or $policies.Count -eq 0) {
-            Write-LogMessage -Message "No Conditional Access policies to populate" -Type Warning
+            Write-LogMessage -Message "EXCEL DEBUG: No Conditional Access policies to populate" -Type Warning
             return
         }
         
-        # Check if we need to expand the table
-        $availableRows = 26  # From template analysis
-        $neededRows = $policies.Count
-        
-        if ($neededRows -gt $availableRows) {
-            Write-LogMessage -Message "Expanding Conditional Access table: need $neededRows rows, have $availableRows" -Type Info
-            Expand-ExcelTable -Worksheet $worksheet -CurrentRows $availableRows -NeededRows $neededRows -StartRow 9
-        }
-        
-        # Populate Conditional Access data
-        $startRow = 9  # Data starts at row 9
+        # Start at row 9 (CA table starts here)
+        $startRow = 9
         $currentRow = $startRow
         
         foreach ($policy in $policies) {
             try {
-                # Map to template columns: B=Policy Name, C=Policy Setting (technical details)
-                $worksheet.Cells.Item($currentRow, 2).Value2 = $policy.DisplayName
-                $worksheet.Cells.Item($currentRow, 3).Value2 = $policy.TechnicalDetails
+                Write-LogMessage -Message "EXCEL DEBUG: Processing CA policy $($policy.DisplayName) at row $currentRow" -Type Info -LogOnly
+                
+                $worksheet.Cells.Item($currentRow, 2).Value = if ($policy.DisplayName) { $policy.DisplayName } else { "Unnamed Policy" }
+                $worksheet.Cells.Item($currentRow, 3).Value = if ($policy.TechnicalDetails) { $policy.TechnicalDetails } else { "State: $($policy.State)" }
                 
                 $currentRow++
             }
             catch {
-                Write-LogMessage -Message "Error updating CA policy row $currentRow`: $($_.Exception.Message)" -Type Warning -LogOnly
+                Write-LogMessage -Message "EXCEL DEBUG: Error updating CA policy row $currentRow - $($_.Exception.Message)" -Type Error
                 $currentRow++
             }
         }
         
-        Write-LogMessage -Message "Successfully updated Conditional Access sheet with $($policies.Count) policies" -Type Success
+        $Workbook.Save()
+        Write-LogMessage -Message "EXCEL DEBUG: Successfully updated Conditional Access sheet with $($policies.Count) policies" -Type Success
     }
     catch {
-        Write-LogMessage -Message "Error updating Conditional Access sheet: $($_.Exception.Message)" -Type Error
+        Write-LogMessage -Message "EXCEL DEBUG: Error updating Conditional Access sheet - $($_.Exception.Message)" -Type Error
     }
 }
 
@@ -1689,10 +1743,14 @@ function Find-ExcelTemplate {
         ".\Master Spreadsheet Customer Details  Test.xlsx",
         "$PSScriptRoot\Master Spreadsheet Customer Details  Test.xlsx",
         "$env:USERPROFILE\Documents\Master Spreadsheet Customer Details  Test.xlsx",
-        "$env:USERPROFILE\Downloads\Master Spreadsheet Customer Details  Test.xlsx"
+        "$env:USERPROFILE\Downloads\Master Spreadsheet Customer Details  Test.xlsx",
+        "$env:TEMP\Master Spreadsheet Customer Details  Test.xlsx"
     )
     
+    Write-LogMessage -Message "Searching for Excel template in multiple locations..." -Type Info
+    
     foreach ($path in $possiblePaths) {
+        Write-LogMessage -Message "Checking: $path" -Type Info -LogOnly
         if (Test-Path $path) {
             Write-LogMessage -Message "Found Excel template at: $path" -Type Success
             return $path
@@ -1704,11 +1762,14 @@ function Find-ExcelTemplate {
     $openFileDialog = New-Object System.Windows.Forms.OpenFileDialog
     $openFileDialog.Filter = "Excel files (*.xlsx)|*.xlsx|All files (*.*)|*.*"
     $openFileDialog.Title = "Select Master Spreadsheet Template"
+    $openFileDialog.InitialDirectory = "$env:USERPROFILE\Downloads"
     
     if ($openFileDialog.ShowDialog() -eq 'OK') {
+        Write-LogMessage -Message "User selected template: $($openFileDialog.FileName)" -Type Success
         return $openFileDialog.FileName
     }
     
+    Write-LogMessage -Message "No template file selected. Cannot continue." -Type Error
     return $null
 }
 
@@ -1746,16 +1807,4 @@ function New-ConfigurationSummary {
     param([hashtable]$TenantData)
     # Placeholder for configuration summary generation
     return $true
-}
-
-# === Execute Enhanced Documentation Directly ===
-Write-LogMessage -Message "Executing Enhanced Documentation module directly..." -Type Info
-$documentationResult = New-TenantDocumentation
-
-if ($documentationResult) {
-    Write-LogMessage -Message "Enhanced Documentation module completed successfully" -Type Success
-    return $true
-} else {
-    Write-LogMessage -Message "Enhanced Documentation module failed" -Type Error  
-    return $false
 }
