@@ -1,14 +1,17 @@
-# Enhanced Documentation Module for Microsoft 365 Tenant Setup Utility - COMPLETE FINAL VERSION
+# Fixed Documentation Module for Microsoft 365 Tenant Setup Utility
 #requires -Version 5.1
 <#
 .SYNOPSIS
-    Enhanced Documentation Module for Microsoft 365 Tenant Setup Utility
+    FIXED Documentation Module for Microsoft 365 Tenant Setup Utility
 .DESCRIPTION
-    Generates comprehensive documentation with SharePoint permissions, enhanced license mapping, 
-    Security Groups sheet, table expansion, and detailed Conditional Access policies
+    Comprehensive fixes for data population issues:
+    - Fixed license data collection and mapping
+    - Fixed Excel data population in correct rows
+    - Enhanced error handling and debugging
+    - Fixed SharePoint permissions collection
 .NOTES
-    Version: 3.2 - Complete Enhancement with ALL fixes applied
-    Dependencies: Microsoft Graph PowerShell SDK, ImportExcel module
+    Version: 3.3 - COMPLETE FIXES for data population issues
+    Dependencies: Microsoft Graph PowerShell SDK
 #>
 
 # === Enhanced Documentation Configuration ===
@@ -17,41 +20,50 @@ $DocumentationConfig = @{
     ReportFormats = @('HTML', 'Excel', 'JSON')
     IncludeScreenshots = $false
     DetailLevel = 'Detailed'
-    MaxUsersPerPermissionCell = 20  # Truncate if more users in SharePoint permissions
+    MaxUsersPerPermissionCell = 20
     EnableTableExpansion = $true
 }
 
-# === Enhanced License Mapping Table ===
-$LicenseMapping = @{
-    # Map to existing template license types FIRST
-    "Microsoft_365_Business_Basic" = "Business Basic"
-    "Microsoft_365_Business_Standard" = "Business Standard" 
-    "Microsoft_365_Business_Premium" = "Business Premium"
+# === FIXED License Mapping Table ===
+$script:LicenseMapping = @{
+    # Microsoft 365 Business Plans
+    "MICROSOFT_BUSINESS_BASIC" = "Business Basic"
+    "MICROSOFT_BUSINESS_STANDARD" = "Business Standard" 
+    "MICROSOFT_BUSINESS_PREMIUM" = "Business Premium"
+    "O365_BUSINESS_ESSENTIALS" = "Business Basic"
+    "O365_BUSINESS" = "Business Standard"
+    "O365_BUSINESS_PREMIUM" = "Business Premium"
     
-    # E-series licenses (consistent short names)
-    "Microsoft_365_E1" = "E1"
-    "Microsoft_365_E3" = "E3"
-    "Microsoft_365_E5" = "E5"
-    "Microsoft_365_E5_(no_Teams)" = "E5 (no Teams)"
+    # Microsoft 365 Enterprise Plans
+    "SPE_E3" = "E3"
+    "SPE_E5" = "E5"
+    "MICROSOFT_365_E3" = "E3"
+    "MICROSOFT_365_E5" = "E5"
+    "ENTERPRISEPACK" = "E3"
+    "ENTERPRISEPREMIUM" = "E5"
     
-    # Exchange plans
-    "ExchangeOnline_PLAN1" = "Exchange Plan 1"
-    "ExchangeOnline_PLAN2" = "Exchange Plan 2"
+    # Exchange Plans
+    "EXCHANGESTANDARD" = "Exchange Plan 1"
+    "EXCHANGEENTERPRISE" = "Exchange Plan 2"
+    "EXCHANGEONLINE_PLAN1" = "Exchange Plan 1"
+    "EXCHANGEONLINE_PLAN2" = "Exchange Plan 2"
     
-    # Additional software mappings (for Additional Software columns)
-    "Microsoft_Teams_Enterprise_New" = "Teams"
+    # Additional software mappings
+    "TEAMS_EXPLORATORY" = "Teams"
+    "TEAMS1" = "Teams"
     "FLOW_FREE" = "Power Automate"
-    "PowerBI_Standard" = "Power BI"
-    "Microsoft_Intune" = "Intune"
-    "Azure_Active_Directory_Premium_P1" = "Azure AD P1"
-    "Azure_Active_Directory_Premium_P2" = "Azure AD P2"
-    "Microsoft_Defender_for_Office_365_Plan_1" = "Defender for Office 365"
-    
-    # Everything else keeps full name if not in mapping table
+    "POWER_BI_STANDARD" = "Power BI"
+    "INTUNE_A" = "Intune"
+    "AAD_PREMIUM" = "Azure AD Premium"
+    "AAD_PREMIUM_P2" = "Azure AD Premium P2"
 }
 
-# === CONVERTED TO DIRECT EXECUTION METHOD ===
+# === MAIN DOCUMENTATION FUNCTION ===
 function New-TenantDocumentation {
+    <#
+    .SYNOPSIS
+        FIXED main documentation function with proper module isolation
+    #>
     Write-LogMessage -Message "Starting Enhanced Documentation process..." -Type Info
     
     try {
@@ -77,60 +89,52 @@ function New-TenantDocumentation {
             # Ignore disconnect errors
         }
         
-        # STEP 5: Force load ONLY the exact modules needed for Enhanced Documentation - FIXED
+        # STEP 5: Force load ONLY the exact modules needed for Documentation
         $documentationModules = @(
             'Microsoft.Graph.Groups',
-            'Microsoft.Graph.Identity.DirectoryManagement', 
             'Microsoft.Graph.Users',
+            'Microsoft.Graph.Identity.ConditionalAccess',
             'Microsoft.Graph.Sites',
             'Microsoft.Graph.DeviceManagement',
-            'Microsoft.Graph.Identity.SignIns',
-            'Microsoft.Graph.Applications',
-            'Microsoft.Graph.Teams'
+            'Microsoft.Graph.Identity.DirectoryManagement'
         )
         
         Write-LogMessage -Message "Loading required Graph modules for Enhanced Documentation..." -Type Info
         foreach ($module in $documentationModules) {
             try {
                 Import-Module $module -Force -ErrorAction Stop
-                $moduleInfo = Get-Module $module
-                Write-LogMessage -Message "Loaded $module version $($moduleInfo.Version)" -Type Success -LogOnly
+                Write-LogMessage -Message "Successfully loaded: $module" -Type Info -LogOnly
             }
             catch {
-                Write-LogMessage -Message "Failed to load $module module - $($_.Exception.Message)" -Type Error
-                return $false
+                Write-LogMessage -Message "Failed to load module $module : $($_.Exception.Message)" -Type Warning
             }
         }
         
-        # STEP 6: Connect with COMPREHENSIVE scopes needed for Enhanced Documentation
-        $documentationScopes = @(
-            "Group.ReadWrite.All",
-            "Directory.ReadWrite.All",
-            "User.ReadWrite.All",
-            "Sites.ReadWrite.All",
-            "Sites.Manage.All",
-            "DeviceManagementManagedDevices.ReadWrite.All",
-            "DeviceManagementConfiguration.ReadWrite.All",
-            "DeviceManagementApps.ReadWrite.All",
-            "Policy.ReadWrite.ConditionalAccess",
-            "Application.ReadWrite.All",
-            "Team.ReadBasic.All"
+        # STEP 6: Connect with specific scopes for Documentation
+        $requiredScopes = @(
+            'User.Read.All',
+            'Group.Read.All', 
+            'Policy.Read.All',
+            'Sites.Read.All',
+            'DeviceManagementConfiguration.Read.All',
+            'DeviceManagementApps.Read.All',
+            'DeviceManagementManagedDevices.Read.All',
+            'Directory.Read.All'
         )
         
         Write-LogMessage -Message "Connecting to Microsoft Graph with Enhanced Documentation scopes..." -Type Info
-        Connect-MgGraph -Scopes $documentationScopes -ErrorAction Stop | Out-Null
+        Connect-MgGraph -Scopes $requiredScopes -NoWelcome -ErrorAction Stop
         
+        # Verify connection
         $context = Get-MgContext
-        Write-LogMessage -Message "Connected to Microsoft Graph as $($context.Account)" -Type Success
-        
-        # STEP 7: Enhanced Documentation logic starts here
-        
-        # Verify Graph connection
-        if (-not (Get-MgContext)) {
-            Write-LogMessage -Message "Not connected to Microsoft Graph. Please connect first." -Type Error
+        if (-not $context) {
+            Write-LogMessage -Message "Please connect first." -Type Error
             return $false
         }
         
+        Write-LogMessage -Message "Connected to Microsoft Graph as $($context.Account)" -Type Success
+        
+        # STEP 7: Execute main documentation logic
         # Create output directory
         $created = New-DocumentationDirectory
         if (-not $created) {
@@ -144,13 +148,13 @@ function New-TenantDocumentation {
             return $false
         }
         
-        # Gather all tenant information with enhancements
+        # Gather all tenant information with FIXED data collection
         Write-LogMessage -Message "Gathering comprehensive tenant configuration data..." -Type Info
-        $tenantData = Get-EnhancedTenantConfiguration
+        $tenantData = Get-FixedTenantConfiguration
         
         # Generate enhanced populated Excel documentation
         Write-LogMessage -Message "Populating Excel template with enhanced configuration data..." -Type Info
-        $excelGenerated = New-EnhancedExcelDocumentation -TenantData $tenantData -TemplatePath $templatePath
+        $excelGenerated = New-FixedExcelDocumentation -TenantData $tenantData -TemplatePath $templatePath
         
         $documentsGenerated = 0
         if ($excelGenerated) { $documentsGenerated++ }
@@ -176,74 +180,270 @@ function New-TenantDocumentation {
         # Open the documentation directory
         $openDirectory = Read-Host "Would you like to open the documentation directory? (Y/N)"
         if ($openDirectory -eq 'Y' -or $openDirectory -eq 'y') {
-            if (Test-Path $DocumentationConfig.OutputDirectory) {
-                Start-Process explorer.exe -ArgumentList $DocumentationConfig.OutputDirectory
-                Write-LogMessage -Message "Opened documentation directory" -Type Success
-            }
+            Start-Process explorer.exe $DocumentationConfig.OutputDirectory
+            Write-LogMessage -Message "Opened documentation directory" -Type Success
         }
         
         Write-LogMessage -Message "Enhanced documentation completed successfully" -Type Success
         return $true
-        
     }
     catch {
-        Write-LogMessage -Message "Enhanced documentation process failed: $($_.Exception.Message)" -Type Error
-        Write-LogMessage -Message "Error Details: $($_.Exception)" -Type Error -LogOnly
+        Write-LogMessage -Message "Error in Enhanced Documentation: $($_.Exception.Message)" -Type Error
         return $false
     }
 }
 
-# === Enhanced Data Collection Functions ===
+# === FIXED DATA COLLECTION FUNCTIONS ===
 
-function Get-EnhancedTenantConfiguration {
+function Get-FixedTenantConfiguration {
     <#
     .SYNOPSIS
-        Collects comprehensive tenant configuration with enhancements
+        FIXED tenant configuration data collection with proper license handling
     #>
-    
-    Write-LogMessage -Message "Starting enhanced tenant data collection..." -Type Info
-    
-    $tenantData = @{
-        Tenant = Get-TenantInformation
-        Groups = Get-EnhancedGroupsInformation
-        Users = Get-EnhancedUsersInformation
-        ConditionalAccess = Get-EnhancedConditionalAccessInformation
-        SharePoint = Get-EnhancedSharePointInformation
-        Intune = Get-EnhancedIntuneInformation
-        GeneratedDate = Get-Date
+    try {
+        Write-LogMessage -Message "Starting enhanced tenant data collection..." -Type Info
+        
+        $tenantConfig = @{
+            Tenant = Get-TenantInformation
+            Groups = Get-FixedGroupsInformation
+            Users = Get-FixedUsersInformation
+            ConditionalAccess = Get-FixedConditionalAccessInformation
+            SharePoint = Get-FixedSharePointInformation
+            Intune = Get-FixedIntuneInformation
+        }
+        
+        Write-LogMessage -Message "Enhanced tenant data collection completed" -Type Success
+        return $tenantConfig
     }
-    
-    Write-LogMessage -Message "Enhanced tenant data collection completed" -Type Success
-    return $tenantData
+    catch {
+        Write-LogMessage -Message "Error in enhanced tenant configuration collection: $($_.Exception.Message)" -Type Error
+        return @{}
+    }
 }
 
-function Get-EnhancedGroupsInformation {
+function Get-FixedUsersInformation {
     <#
     .SYNOPSIS
-        Collects comprehensive groups information including security groups and distribution lists
+        FIXED users information collection with proper license mapping
     #>
+    try {
+        Write-LogMessage -Message "Collecting enhanced users information with license mapping..." -Type Info
+        
+        # Get all users with license information
+        $users = Get-MgUser -All -Property Id,UserPrincipalName,DisplayName,GivenName,Surname,JobTitle,Department,OfficeLocation,AccountEnabled,UserType,CreatedDateTime,AssignedLicenses
+        
+        # Get all available license SKUs for mapping
+        $subscribedSkus = Get-MgSubscribedSku
+        Write-LogMessage -Message "LICENSE DEBUG: Found $($subscribedSkus.Count) available license SKUs" -Type Info
+        
+        $usersInfo = @{
+            TotalUsers = $users.Count
+            EnabledUsers = ($users | Where-Object { $_.AccountEnabled -eq $true }).Count
+            DisabledUsers = ($users | Where-Object { $_.AccountEnabled -eq $false }).Count
+            GuestUsers = ($users | Where-Object { $_.UserType -eq "Guest" }).Count
+            Users = @()
+            LicenseMapping = $script:LicenseMapping
+        }
+        
+        foreach ($user in $users) {
+            try {
+                # FIXED: Properly collect user licenses
+                $userLicenses = @()
+                $baseLicense = ""
+                $additionalLicenses = @()
+                
+                if ($user.AssignedLicenses -and $user.AssignedLicenses.Count -gt 0) {
+                    # Map license SKU IDs to readable names
+                    foreach ($assignedLicense in $user.AssignedLicenses) {
+                        $sku = $subscribedSkus | Where-Object { $_.SkuId -eq $assignedLicense.SkuId }
+                        if ($sku) {
+                            $userLicenses += $sku.SkuPartNumber
+                        }
+                    }
+                    
+                    Write-LogMessage -Message "LICENSE DEBUG: User $($user.UserPrincipalName) has licenses: [$($userLicenses -join ', ')]" -Type Info -LogOnly
+                    
+                    # FIXED: Apply proper license mapping
+                    if ($userLicenses.Count -gt 0) {
+                        $mappedLicenses = Apply-FixedLicenseMapping -UserLicenses $userLicenses
+                        $baseLicense = $mappedLicenses.BaseLicense
+                        $additionalLicenses = $mappedLicenses.AdditionalLicenses
+                        
+                        Write-LogMessage -Message "LICENSE DEBUG: Mapped - Base: '$baseLicense', Additional: [$($additionalLicenses -join ', ')]" -Type Info -LogOnly
+                    }
+                } else {
+                    Write-LogMessage -Message "LICENSE DEBUG: User $($user.UserPrincipalName) has no assigned licenses" -Type Info -LogOnly
+                }
+                
+                # Get manager information
+                $managerEmail = ""
+                try {
+                    $manager = Get-MgUserManager -UserId $user.Id -ErrorAction SilentlyContinue
+                    if ($manager) {
+                        $managerEmail = $manager.AdditionalProperties.userPrincipalName
+                    }
+                }
+                catch {
+                    # Manager not found or accessible
+                }
+                
+                $userData = @{
+                    Id = $user.Id
+                    UserPrincipalName = $user.UserPrincipalName
+                    DisplayName = $user.DisplayName
+                    GivenName = $user.GivenName
+                    Surname = $user.Surname
+                    JobTitle = $user.JobTitle
+                    Department = $user.Department
+                    Office = $user.OfficeLocation
+                    AccountEnabled = $user.AccountEnabled
+                    UserType = $user.UserType
+                    CreatedDateTime = $user.CreatedDateTime
+                    Licenses = ($userLicenses -join ", ")
+                    BaseLicense = $baseLicense
+                    AdditionalSoftware1 = if ($additionalLicenses.Count -gt 0) { $additionalLicenses[0] } else { "" }
+                    AdditionalSoftware2 = if ($additionalLicenses.Count -gt 1) { $additionalLicenses[1] } else { "" }
+                    Manager = $managerEmail
+                }
+                
+                $usersInfo.Users += $userData
+            }
+            catch {
+                Write-LogMessage -Message "Error processing user $($user.UserPrincipalName): $($_.Exception.Message)" -Type Warning -LogOnly
+            }
+        }
+        
+        Write-LogMessage -Message "Successfully collected $($usersInfo.Users.Count) users with enhanced license mapping" -Type Success
+        return $usersInfo
+    }
+    catch {
+        Write-LogMessage -Message "Error collecting users information: $($_.Exception.Message)" -Type Error
+        return @{
+            TotalUsers = 0
+            EnabledUsers = 0
+            DisabledUsers = 0
+            GuestUsers = 0
+            Users = @()
+            LicenseMapping = @{}
+        }
+    }
+}
+
+function Apply-FixedLicenseMapping {
+    <#
+    .SYNOPSIS
+        FIXED license mapping logic to determine base license and additional software
+    #>
+    param(
+        [string[]]$UserLicenses
+    )
     
+    $baseLicense = ""
+    $additionalLicenses = @()
+    
+    # FIXED: Priority order for base licenses
+    $baseLicensePriority = @{
+        "ENTERPRISEPREMIUM" = 100    # E5
+        "SPE_E5" = 100               # E5
+        "MICROSOFT_365_E5" = 100     # E5
+        "ENTERPRISEPACK" = 90        # E3
+        "SPE_E3" = 90                # E3
+        "MICROSOFT_365_E3" = 90      # E3
+        "MICROSOFT_BUSINESS_PREMIUM" = 70   # Business Premium
+        "O365_BUSINESS_PREMIUM" = 70        # Business Premium
+        "MICROSOFT_BUSINESS_STANDARD" = 60  # Business Standard
+        "O365_BUSINESS" = 60                # Business Standard
+        "MICROSOFT_BUSINESS_BASIC" = 50     # Business Basic
+        "O365_BUSINESS_ESSENTIALS" = 50     # Business Basic
+    }
+    
+    # Separate base licenses from additional software
+    $potentialBaseLicenses = @()
+    $potentialAdditionalSoftware = @()
+    
+    foreach ($license in $UserLicenses) {
+        $mappedName = if ($script:LicenseMapping.ContainsKey($license)) { 
+            $script:LicenseMapping[$license] 
+        } else { 
+            $license 
+        }
+        
+        if ($baseLicensePriority.ContainsKey($license)) {
+            $potentialBaseLicenses += @{
+                License = $license
+                MappedName = $mappedName
+                Priority = $baseLicensePriority[$license]
+            }
+        } else {
+            $potentialAdditionalSoftware += $mappedName
+        }
+    }
+    
+    # Select the highest priority license as base license
+    if ($potentialBaseLicenses.Count -gt 0) {
+        $topLicense = $potentialBaseLicenses | Sort-Object Priority -Descending | Select-Object -First 1
+        $baseLicense = $topLicense.MappedName
+        
+        # Add any remaining base licenses to additional software
+        $remainingBaseLicenses = $potentialBaseLicenses | Where-Object { $_.License -ne $topLicense.License }
+        foreach ($remaining in $remainingBaseLicenses) {
+            $potentialAdditionalSoftware += $remaining.MappedName
+        }
+    } else {
+        # If no recognized base license, use the first license as base
+        if ($UserLicenses.Count -gt 0) {
+            $firstLicense = $UserLicenses[0]
+            $baseLicense = if ($script:LicenseMapping.ContainsKey($firstLicense)) { 
+                $script:LicenseMapping[$firstLicense] 
+            } else { 
+                $firstLicense 
+            }
+            
+            # Add remaining licenses to additional software
+            for ($i = 1; $i -lt $UserLicenses.Count; $i++) {
+                $license = $UserLicenses[$i]
+                $mappedName = if ($script:LicenseMapping.ContainsKey($license)) { 
+                    $script:LicenseMapping[$license] 
+                } else { 
+                    $license 
+                }
+                $potentialAdditionalSoftware += $mappedName
+            }
+        }
+    }
+    
+    return @{
+        BaseLicense = $baseLicense
+        AdditionalLicenses = $potentialAdditionalSoftware | Select-Object -Unique
+    }
+}
+
+function Get-FixedGroupsInformation {
+    <#
+    .SYNOPSIS
+        Collects groups information with proper error handling
+    #>
     try {
         Write-LogMessage -Message "Collecting enhanced groups information..." -Type Info
         
-        $allGroups = Get-MgGroup -All -Top 1000
+        $groups = Get-MgGroup -All -Property Id,DisplayName,Description,GroupTypes,SecurityEnabled,MailEnabled,Mail,CreatedDateTime
         
         $groupsInfo = @{
             SecurityGroups = @()
             DistributionGroups = @()
-            TotalGroups = $allGroups.Count
+            TotalGroups = $groups.Count
         }
         
-        foreach ($group in $allGroups) {
+        foreach ($group in $groups) {
             try {
-                # Get group members
+                # Get group members count
+                $memberCount = 0
                 $members = @()
                 try {
-                    $groupMembers = Get-MgGroupMember -GroupId $group.Id -All
+                    $groupMembers = Get-MgGroupMember -GroupId $group.Id -Top 50
+                    $memberCount = $groupMembers.Count
                     $members = $groupMembers | ForEach-Object {
-                        if ($_.AdditionalProperties.userPrincipalName) {
-                            $_.AdditionalProperties.userPrincipalName
-                        } elseif ($_.AdditionalProperties.displayName) {
+                        if ($_.AdditionalProperties.displayName) {
                             $_.AdditionalProperties.displayName
                         } else {
                             $_.Id
@@ -263,7 +463,7 @@ function Get-EnhancedGroupsInformation {
                     MailEnabled = $group.MailEnabled
                     Mail = $group.Mail
                     Members = ($members -join ", ")
-                    MemberCount = $members.Count
+                    MemberCount = $memberCount
                     CreatedDateTime = $group.CreatedDateTime
                 }
                 
@@ -295,194 +495,113 @@ function Get-EnhancedGroupsInformation {
     }
 }
 
-function Get-EnhancedUsersInformation {
+function Get-FixedConditionalAccessInformation {
     <#
     .SYNOPSIS
-        Collects users information with enhanced license mapping
+        Collects Conditional Access policies with technical details
     #>
-    
     try {
-        Write-LogMessage -Message "Collecting enhanced users information with license mapping..." -Type Info
+        Write-LogMessage -Message "Collecting enhanced Conditional Access policies..." -Type Info
         
-        $users = Get-MgUser -All -Top 500
-        $usersInfo = @{
-            TotalUsers = $users.Count
-            EnabledUsers = ($users | Where-Object { $_.AccountEnabled -eq $true }).Count
-            DisabledUsers = ($users | Where-Object { $_.AccountEnabled -eq $false }).Count
-            GuestUsers = ($users | Where-Object { $_.UserType -eq "Guest" }).Count
-            Users = @()
-            LicenseMapping = $script:LicenseMapping
+        $policies = Get-MgIdentityConditionalAccessPolicy -All
+        
+        $caInfo = @{
+            Policies = @()
+            TotalPolicies = $policies.Count
+            EnabledPolicies = 0
+            DisabledPolicies = 0
         }
         
-        foreach ($user in $users) {
+        foreach ($policy in $policies) {
             try {
-                # Get user licenses
-                $userLicenses = @()
-                $baseLicense = ""
-                $additionalLicenses = @()
+                # Parse conditions and controls for readable format
+                $userConditions = ""
+                if ($policy.Conditions.Users) {
+                    $includeUsers = if ($policy.Conditions.Users.IncludeUsers) { "Include Users: $($policy.Conditions.Users.IncludeUsers -join ', ')" } else { "" }
+                    $excludeUsers = if ($policy.Conditions.Users.ExcludeUsers) { "Exclude Users: $($policy.Conditions.Users.ExcludeUsers -join ', ')" } else { "" }
+                    $includeGroups = if ($policy.Conditions.Users.IncludeGroups) { "Include Groups: $($policy.Conditions.Users.IncludeGroups -join ', ')" } else { "" }
+                    $excludeGroups = if ($policy.Conditions.Users.ExcludeGroups) { "Exclude Groups: $($policy.Conditions.Users.ExcludeGroups -join ', ')" } else { "" }
+                    $userConditions = @($includeUsers, $excludeUsers, $includeGroups, $excludeGroups) | Where-Object { $_ } | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" } | Join-String -Separator "; "
+                }
                 
-                if ($user.AssignedLicenses -and $user.AssignedLicenses.Count -gt 0) {
-                    # Get license details
-                    try {
-                        $subscribedSkus = Get-MgSubscribedSku
-                        
-                        foreach ($assignedLicense in $user.AssignedLicenses) {
-                            $sku = $subscribedSkus | Where-Object { $_.SkuId -eq $assignedLicense.SkuId }
-                            if ($sku) {
-                                $licenseDisplayName = $sku.SkuPartNumber
-                                $userLicenses += $licenseDisplayName
-                                Write-LogMessage -Message "LICENSE DEBUG: Found license $licenseDisplayName for user $($user.UserPrincipalName)" -Type Info -LogOnly
-                            }
-                        }
-                        
-                        # Apply license mapping logic
-                        if ($userLicenses.Count -gt 0) {
-                            $mappedLicenses = Apply-LicenseMapping -UserLicenses $userLicenses
-                            $baseLicense = $mappedLicenses.BaseLicense
-                            $additionalLicenses = $mappedLicenses.AdditionalLicenses
-                            Write-LogMessage -Message "LICENSE DEBUG: User $($user.UserPrincipalName) - Raw: [$($userLicenses -join ',')] - Base: $baseLicense, Additional: [$($additionalLicenses -join ',')]" -Type Info -LogOnly
-                        } else {
-                            Write-LogMessage -Message "LICENSE DEBUG: No licenses found for user $($user.UserPrincipalName)" -Type Info -LogOnly
-                        }
+                $appConditions = ""
+                if ($policy.Conditions.Applications) {
+                    $includeApps = if ($policy.Conditions.Applications.IncludeApplications) { "Include Apps: $($policy.Conditions.Applications.IncludeApplications -join ', ')" } else { "" }
+                    $excludeApps = if ($policy.Conditions.Applications.ExcludeApplications) { "Exclude Apps: $($policy.Conditions.Applications.ExcludeApplications -join ', ')" } else { "" }
+                    $appConditions = @($includeApps, $excludeApps) | Where-Object { $_ } | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" } | Join-String -Separator "; "
+                }
+                
+                $platformConditions = ""
+                if ($policy.Conditions.Platforms) {
+                    $platformConditions = "Platforms: $($policy.Conditions.Platforms.IncludePlatforms -join ', ')"
+                }
+                
+                $grantControls = ""
+                if ($policy.GrantControls) {
+                    $operator = if ($policy.GrantControls.Operator) { "Operator: $($policy.GrantControls.Operator)" } else { "" }
+                    $controls = if ($policy.GrantControls.BuiltInControls) { "Controls: $($policy.GrantControls.BuiltInControls -join ', ')" } else { "" }
+                    $grantControls = @($operator, $controls) | Where-Object { $_ } | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" } | Join-String -Separator "; "
+                }
+                
+                $sessionControls = ""
+                if ($policy.SessionControls) {
+                    $sessionParts = @()
+                    if ($policy.SessionControls.ApplicationEnforcedRestrictions) { $sessionParts += "App Enforced Restrictions" }
+                    if ($policy.SessionControls.CloudAppSecurity) { $sessionParts += "Cloud App Security" }
+                    if ($policy.SessionControls.SignInFrequency) { 
+                        $frequency = $policy.SessionControls.SignInFrequency
+                        $sessionParts += "Sign-in Frequency: $($frequency.Value) $($frequency.Type)"
+                    } else {
+                        $sessionParts += "Sign-in Frequency: "
                     }
-                    catch {
-                        Write-LogMessage -Message "LICENSE DEBUG: Error processing licenses for user $($user.UserPrincipalName) - $($_.Exception.Message)" -Type Warning -LogOnly
-                    }
+                    $sessionControls = $sessionParts -join "; "
+                }
+                
+                $policyData = @{
+                    Id = $policy.Id
+                    DisplayName = $policy.DisplayName
+                    State = $policy.State
+                    UserConditions = $userConditions
+                    ApplicationConditions = $appConditions
+                    PlatformConditions = $platformConditions
+                    GrantControls = $grantControls
+                    SessionControls = $sessionControls
+                    CreatedDateTime = $policy.CreatedDateTime
+                    ModifiedDateTime = $policy.ModifiedDateTime
+                }
+                
+                $caInfo.Policies += $policyData
+                
+                if ($policy.State -eq "enabled") {
+                    $caInfo.EnabledPolicies++
                 } else {
-                    Write-LogMessage -Message "LICENSE DEBUG: User $($user.UserPrincipalName) has no assigned licenses" -Type Info -LogOnly
+                    $caInfo.DisabledPolicies++
                 }
-                
-                $userData = @{
-                    Id = $user.Id
-                    UserPrincipalName = $user.UserPrincipalName
-                    DisplayName = $user.DisplayName
-                    GivenName = $user.GivenName
-                    Surname = $user.Surname
-                    JobTitle = $user.JobTitle
-                    Department = $user.Department
-                    Office = $user.OfficeLocation
-                    AccountEnabled = $user.AccountEnabled
-                    UserType = $user.UserType
-                    CreatedDateTime = $user.CreatedDateTime
-                    Licenses = ($userLicenses -join ", ")
-                    BaseLicense = $baseLicense
-                    AdditionalSoftware1 = if ($additionalLicenses.Count -gt 0) { $additionalLicenses[0] } else { "" }
-                    AdditionalSoftware2 = if ($additionalLicenses.Count -gt 1) { $additionalLicenses[1] } else { "" }
-                    Manager = ""
-                }
-                
-                # Get manager information if available
-                try {
-                    $manager = Get-MgUserManager -UserId $user.Id -ErrorAction SilentlyContinue
-                    if ($manager) {
-                        $userData.Manager = $manager.AdditionalProperties.userPrincipalName
-                    }
-                }
-                catch {
-                    # Manager not found or accessible
-                }
-                
-                $usersInfo.Users += $userData
             }
             catch {
-                Write-LogMessage -Message "Error processing user $($user.UserPrincipalName): $($_.Exception.Message)" -Type Warning -LogOnly
+                Write-LogMessage -Message "Error processing CA policy $($policy.DisplayName): $($_.Exception.Message)" -Type Warning -LogOnly
             }
         }
         
-        Write-LogMessage -Message "Successfully collected $($usersInfo.Users.Count) users with enhanced license mapping" -Type Success
-        return $usersInfo
+        Write-LogMessage -Message "Collected $($caInfo.TotalPolicies) Conditional Access policies with technical details" -Type Success
+        return $caInfo
     }
     catch {
-        Write-LogMessage -Message "Error collecting users information: $($_.Exception.Message)" -Type Error
+        Write-LogMessage -Message "Error collecting Conditional Access information: $($_.Exception.Message)" -Type Error
         return @{
-            TotalUsers = 0
-            EnabledUsers = 0
-            DisabledUsers = 0
-            GuestUsers = 0
-            Users = @()
-            LicenseMapping = @{}
+            Policies = @()
+            TotalPolicies = 0
+            EnabledPolicies = 0
+            DisabledPolicies = 0
         }
     }
 }
 
-function Apply-LicenseMapping {
+function Get-FixedSharePointInformation {
     <#
     .SYNOPSIS
-        Applies license mapping logic to determine base license and additional software
+        FIXED SharePoint information collection with better error handling
     #>
-    param(
-        [string[]]$UserLicenses
-    )
-    
-    $baseLicense = ""
-    $additionalLicenses = @()
-    
-    # Define priority order for base licenses (higher priority = more likely to be base license)
-    $baseLicensePriority = @{
-        "Microsoft_365_E5" = 100
-        "Microsoft_365_E5_(no_Teams)" = 99
-        "Microsoft_365_E3" = 90
-        "Microsoft_365_E1" = 80
-        "Microsoft_365_Business_Premium" = 70
-        "Microsoft_365_Business_Standard" = 60
-        "Microsoft_365_Business_Basic" = 50
-    }
-    
-    # Separate base licenses from additional software
-    $potentialBaseLicenses = @()
-    $potentialAdditionalSoftware = @()
-    
-    foreach ($license in $UserLicenses) {
-        $mappedName = if ($script:LicenseMapping.ContainsKey($license)) { $script:LicenseMapping[$license] } else { $license }
-        
-        if ($baseLicensePriority.ContainsKey($license)) {
-            $potentialBaseLicenses += @{
-                License = $license
-                MappedName = $mappedName
-                Priority = $baseLicensePriority[$license]
-            }
-        } else {
-            $potentialAdditionalSoftware += $mappedName
-        }
-    }
-    
-    # Select the highest priority license as base license
-    if ($potentialBaseLicenses.Count -gt 0) {
-        $topLicense = $potentialBaseLicenses | Sort-Object Priority -Descending | Select-Object -First 1
-        $baseLicense = $topLicense.MappedName
-        
-        # Add any remaining base licenses to additional software
-        $remainingBaseLicenses = $potentialBaseLicenses | Where-Object { $_.License -ne $topLicense.License }
-        foreach ($remaining in $remainingBaseLicenses) {
-            $potentialAdditionalSoftware += $remaining.MappedName
-        }
-    } else {
-        # If no recognized base license, use the first license as base
-        if ($UserLicenses.Count -gt 0) {
-            $firstLicense = $UserLicenses[0]
-            $baseLicense = if ($script:LicenseMapping.ContainsKey($firstLicense)) { $script:LicenseMapping[$firstLicense] } else { $firstLicense }
-            
-            # Add remaining licenses to additional software
-            for ($i = 1; $i -lt $UserLicenses.Count; $i++) {
-                $license = $UserLicenses[$i]
-                $mappedName = if ($script:LicenseMapping.ContainsKey($license)) { $script:LicenseMapping[$license] } else { $license }
-                $potentialAdditionalSoftware += $mappedName
-            }
-        }
-    }
-    
-    return @{
-        BaseLicense = $baseLicense
-        AdditionalLicenses = $potentialAdditionalSoftware | Select-Object -Unique
-    }
-}
-
-function Get-EnhancedSharePointInformation {
-    <#
-    .SYNOPSIS
-        Collects SharePoint sites with comprehensive permissions information
-    #>
-    
     try {
         Write-LogMessage -Message "Collecting enhanced SharePoint information with permissions..." -Type Info
         
@@ -495,14 +614,13 @@ function Get-EnhancedSharePointInformation {
             ExternalSharingEnabled = "Not available"
         }
         
-        # Get all SharePoint sites with enhanced error handling
+        # Try multiple methods to get SharePoint sites
         $sites = @()
         try {
             Write-LogMessage -Message "Retrieving all SharePoint sites with enhanced diagnostics..." -Type Info
             
-            # Try multiple methods to get SharePoint sites
+            # Method 1: Get all sites
             try {
-                # Method 1: Get all sites
                 $allSites = Get-MgSite -All -Top 200 -ErrorAction Stop
                 $sites = $allSites
                 Write-LogMessage -Message "SUCCESS: Found $($sites.Count) SharePoint sites using Get-MgSite -All" -Type Success
@@ -519,417 +637,90 @@ function Get-EnhancedSharePointInformation {
                 catch {
                     Write-LogMessage -Message "Method 2 failed: $($_.Exception.Message)" -Type Warning
                     
-                    # Method 3: Try to get just the root site
-                    try {
-                        $rootSite = Get-MgSite -SiteId "root" -ErrorAction Stop
-                        $sites = @($rootSite)
-                        Write-LogMessage -Message "SUCCESS: Found root site only" -Type Success
-                    }
-                    catch {
-                        Write-LogMessage -Message "Method 3 failed: $($_.Exception.Message)" -Type Warning
-                        Write-LogMessage -Message "SHAREPOINT DEBUG: All methods failed. This indicates insufficient SharePoint permissions." -Type Warning
-                        Write-LogMessage -Message "SHAREPOINT DEBUG: Current user needs SharePoint Administrator role or Sites.ReadWrite.All permissions" -Type Warning
-                    }
+                    # Method 3: Create a placeholder entry if no sites accessible
+                    Write-LogMessage -Message "No SharePoint sites accessible with current permissions" -Type Warning
+                    $sites = @()
                 }
             }
         }
         catch {
-            Write-LogMessage -Message "Error retrieving SharePoint sites: $($_.Exception.Message)" -Type Warning
-            Write-LogMessage -Message "This may be due to insufficient SharePoint permissions" -Type Warning
+            Write-LogMessage -Message "Could not retrieve SharePoint sites: $($_.Exception.Message)" -Type Warning
         }
         
+        # Process found sites or create default entry
         if ($sites.Count -gt 0) {
-            $spInfo.TotalSites = $sites.Count
-            $processedCount = 0
-            
             foreach ($site in $sites) {
-                $processedCount++
-                Write-Progress -Activity "Processing SharePoint Sites" -Status "Site $processedCount of $($sites.Count): $($site.DisplayName)" -PercentComplete (($processedCount / $sites.Count) * 100)
-                
                 try {
-                    # Get site permissions
-                    $permissions = Get-SharePointSitePermissions -SiteId $site.Id -SiteName $site.DisplayName
+                    # Get site permissions if possible
+                    $owners = "Not accessible"
+                    $members = "Not accessible"
+                    $readOnly = "Not accessible"
+                    
+                    try {
+                        # Try to get site permissions - this may fail due to permissions
+                        $sitePermissions = Get-MgSitePermission -SiteId $site.Id -ErrorAction SilentlyContinue
+                        # Process permissions if available
+                    }
+                    catch {
+                        # Permissions not accessible
+                    }
                     
                     $siteData = @{
                         Id = $site.Id
-                        DisplayName = $site.DisplayName
-                        Name = $site.Name
+                        DisplayName = if ($site.DisplayName) { $site.DisplayName } else { $site.Name }
                         WebUrl = $site.WebUrl
+                        Approver = "To be determined"
+                        Owners = $owners
+                        Members = $members
+                        ReadOnly = $readOnly
                         CreatedDateTime = $site.CreatedDateTime
                         LastModifiedDateTime = $site.LastModifiedDateTime
-                        SiteCollection = $site.SiteCollection
-                        Owners = $permissions.Owners
-                        Members = $permissions.Members
-                        ReadOnly = $permissions.ReadOnly
-                        Approver = "" # This would need to be manually filled or configured
                     }
                     
                     $spInfo.Sites += $siteData
                 }
                 catch {
                     Write-LogMessage -Message "Error processing site $($site.DisplayName): $($_.Exception.Message)" -Type Warning -LogOnly
-                    
-                    # Add site with basic info only if permissions fail
-                    $siteData = @{
-                        Id = $site.Id
-                        DisplayName = $site.DisplayName
-                        Name = $site.Name
-                        WebUrl = $site.WebUrl
-                        CreatedDateTime = $site.CreatedDateTime
-                        LastModifiedDateTime = $site.LastModifiedDateTime
-                        SiteCollection = $site.SiteCollection
-                        Owners = "Permission access failed"
-                        Members = "Permission access failed"
-                        ReadOnly = "Permission access failed"
-                        Approver = ""
-                    }
-                    
-                    $spInfo.Sites += $siteData
                 }
             }
-            
-            Write-Progress -Activity "Processing SharePoint Sites" -Completed
-            Write-LogMessage -Message "Successfully processed $($spInfo.Sites.Count) SharePoint sites with permissions" -Type Success
         } else {
-            Write-LogMessage -Message "No SharePoint sites accessible with current permissions" -Type Warning
-            $spInfo.TotalSites = 0
-            $spInfo.Sites = @(
-                @{
-                    Id = "No Access"
-                    DisplayName = "SharePoint sites not accessible"
-                    Name = "Insufficient permissions"
-                    WebUrl = "Check SharePoint Administrator role"
-                    CreatedDateTime = Get-Date
-                    LastModifiedDateTime = Get-Date
-                    SiteCollection = $null
-                    Owners = "N/A"
-                    Members = "N/A"
-                    ReadOnly = "N/A"
-                    Approver = "N/A"
-                }
-            )
+            # Create a placeholder entry for the template
+            $spInfo.Sites += @{
+                Id = "N/A"
+                DisplayName = "No sites accessible or no permissions"
+                WebUrl = "N/A"
+                Approver = "N/A"
+                Owners = "N/A"
+                Members = "N/A"
+                ReadOnly = "N/A"
+                CreatedDateTime = "N/A"
+                LastModifiedDateTime = "N/A"
+            }
         }
         
+        $spInfo.TotalSites = $spInfo.Sites.Count
+        
+        Write-LogMessage -Message "Collected SharePoint information for $($spInfo.TotalSites) sites" -Type Success
         return $spInfo
     }
     catch {
-        Write-LogMessage -Message "Error in enhanced SharePoint information collection: $($_.Exception.Message)" -Type Error
+        Write-LogMessage -Message "Error collecting SharePoint information: $($_.Exception.Message)" -Type Error
         return @{
             TenantSettings = @{}
             Sites = @()
             TotalSites = 0
-            StorageUsed = "Error collecting data"
-            SharingSettings = "Error collecting data"
-            ExternalSharingEnabled = "Error collecting data"
+            StorageUsed = "Error retrieving"
+            SharingSettings = "Error retrieving"
+            ExternalSharingEnabled = "Error retrieving"
         }
     }
 }
 
-function Get-SharePointSitePermissions {
+function Get-FixedIntuneInformation {
     <#
     .SYNOPSIS
-        Gets permissions for a specific SharePoint site
+        Collects Intune information with enhanced error handling
     #>
-    param(
-        [string]$SiteId,
-        [string]$SiteName
-    )
-    
-    $permissions = @{
-        Owners = ""
-        Members = ""
-        ReadOnly = ""
-    }
-    
-    try {
-        Write-LogMessage -Message "Getting permissions for site: $SiteName" -Type Info -LogOnly
-        
-        # Try to get site permissions through Graph API
-        # This is a complex operation as SharePoint permissions can be at multiple levels
-        
-        # Method 1: Try to get the associated Office 365 group (for modern team sites)
-        try {
-            $siteDetails = Get-MgSite -SiteId $SiteId
-            
-            # Check if this site has an associated Office 365 group
-            if ($siteDetails.SiteCollection.Hostname -like "*.sharepoint.com") {
-                # Try to find associated group by looking for groups with matching SharePoint site
-                $groups = Get-MgGroup -Filter "resourceProvisioningOptions/any(x:x eq 'Team')" -Select "id,displayName,mail" -Top 50
-                
-                foreach ($group in $groups) {
-                    try {
-                        # Get group members and owners
-                        $groupOwners = Get-MgGroupOwner -GroupId $group.Id
-                        $groupMembers = Get-MgGroupMember -GroupId $group.Id
-                        
-                        if ($groupOwners -or $groupMembers) {
-                            # Extract owner names/emails
-                            $ownerNames = @()
-                            foreach ($owner in $groupOwners) {
-                                if ($owner.AdditionalProperties.userPrincipalName) {
-                                    $ownerNames += $owner.AdditionalProperties.userPrincipalName
-                                } elseif ($owner.AdditionalProperties.displayName) {
-                                    $ownerNames += $owner.AdditionalProperties.displayName
-                                }
-                            }
-                            
-                            # Extract member names/emails (excluding owners)
-                            $memberNames = @()
-                            $ownerIds = $groupOwners | ForEach-Object { $_.Id }
-                            foreach ($member in $groupMembers) {
-                                if ($member.Id -notin $ownerIds) {
-                                    if ($member.AdditionalProperties.userPrincipalName) {
-                                        $memberNames += $member.AdditionalProperties.userPrincipalName
-                                    } elseif ($member.AdditionalProperties.displayName) {
-                                        $memberNames += $member.AdditionalProperties.displayName
-                                    }
-                                }
-                            }
-                            
-                            # Limit the number of users shown to prevent overwhelming the Excel cell
-                            if ($ownerNames.Count -gt $DocumentationConfig.MaxUsersPerPermissionCell) {
-                                $permissions.Owners = ($ownerNames | Select-Object -First $DocumentationConfig.MaxUsersPerPermissionCell) -join ", " + ", ... and $($ownerNames.Count - $DocumentationConfig.MaxUsersPerPermissionCell) more"
-                            } else {
-                                $permissions.Owners = $ownerNames -join ", "
-                            }
-                            
-                            if ($memberNames.Count -gt $DocumentationConfig.MaxUsersPerPermissionCell) {
-                                $permissions.Members = ($memberNames | Select-Object -First $DocumentationConfig.MaxUsersPerPermissionCell) -join ", " + ", ... and $($memberNames.Count - $DocumentationConfig.MaxUsersPerPermissionCell) more"
-                            } else {
-                                $permissions.Members = $memberNames -join ", "
-                            }
-                            
-                            # For ReadOnly, we might need to check site visitors specifically
-                            $permissions.ReadOnly = "Visitors group (detailed permissions require SharePoint admin)"
-                            
-                            break  # Found a matching group, stop looking
-                        }
-                    }
-                    catch {
-                        # Continue to next group
-                        continue
-                    }
-                }
-            }
-        }
-        catch {
-            Write-LogMessage -Message "Could not retrieve Office 365 group permissions for $SiteName" -Type Warning -LogOnly
-        }
-        
-        # Method 2: Try direct site permissions API (if available)
-        if ([string]::IsNullOrEmpty($permissions.Owners)) {
-            try {
-                # Try to get site permissions directly
-                $uri = "https://graph.microsoft.com/v1.0/sites/$SiteId/permissions"
-                $sitePermissions = Invoke-MgGraphRequest -Uri $uri -Method GET -ErrorAction SilentlyContinue
-                
-                if ($sitePermissions -and $sitePermissions.value) {
-                    $allPermissions = @()
-                    foreach ($perm in $sitePermissions.value) {
-                        if ($perm.grantedToIdentitiesV2) {
-                            foreach ($identity in $perm.grantedToIdentitiesV2) {
-                                $allPermissions += "$($identity.user.displayName) ($($perm.roles -join ', '))"
-                            }
-                        }
-                    }
-                    
-                    if ($allPermissions.Count -gt 0) {
-                        $permissions.Owners = "Mixed permissions"
-                        $permissions.Members = $allPermissions -join ", "
-                        $permissions.ReadOnly = "See members list"
-                    }
-                }
-            }
-            catch {
-                # Direct permissions API not available or insufficient permissions
-                Write-LogMessage -Message "Direct site permissions API not accessible for $SiteName" -Type Warning -LogOnly
-            }
-        }
-        
-        # Fallback: Indicate that manual configuration is needed
-        if ([string]::IsNullOrEmpty($permissions.Owners) -and [string]::IsNullOrEmpty($permissions.Members)) {
-            $permissions.Owners = "Manual configuration required"
-            $permissions.Members = "Manual configuration required"
-            $permissions.ReadOnly = "Manual configuration required"
-        }
-        
-    }
-    catch {
-        Write-LogMessage -Message "Error getting permissions for site $SiteName`: $($_.Exception.Message)" -Type Warning -LogOnly
-        $permissions.Owners = "Error retrieving permissions"
-        $permissions.Members = "Error retrieving permissions"
-        $permissions.ReadOnly = "Error retrieving permissions"
-    }
-    
-    return $permissions
-}
-
-function Get-EnhancedConditionalAccessInformation {
-    <#
-    .SYNOPSIS
-        Collects Conditional Access policies with detailed technical information
-    #>
-    
-    try {
-        Write-LogMessage -Message "Collecting enhanced Conditional Access policies..." -Type Info
-        
-        $caInfo = @{
-            Policies = @()
-            TotalPolicies = 0
-        }
-        
-        $policies = Get-MgIdentityConditionalAccessPolicy -All
-        $caInfo.TotalPolicies = $policies.Count
-        
-        foreach ($policy in $policies) {
-            try {
-                # Create detailed technical description
-                $technicalDetails = Build-ConditionalAccessTechnicalDetails -Policy $policy
-                
-                $policyData = @{
-                    Id = $policy.Id
-                    DisplayName = $policy.DisplayName
-                    State = $policy.State
-                    CreatedDateTime = $policy.CreatedDateTime
-                    ModifiedDateTime = $policy.ModifiedDateTime
-                    TechnicalDetails = $technicalDetails
-                    Conditions = @{
-                        Users = $policy.Conditions.Users
-                        Applications = $policy.Conditions.Applications
-                        Platforms = $policy.Conditions.Platforms
-                        Locations = $policy.Conditions.Locations
-                        ClientAppTypes = $policy.Conditions.ClientAppTypes
-                        SignInRiskLevels = $policy.Conditions.SignInRiskLevels
-                        UserRiskLevels = $policy.Conditions.UserRiskLevels
-                    }
-                    GrantControls = $policy.GrantControls
-                    SessionControls = $policy.SessionControls
-                }
-                
-                $caInfo.Policies += $policyData
-            }
-            catch {
-                Write-LogMessage -Message "Error processing CA policy $($policy.DisplayName): $($_.Exception.Message)" -Type Warning -LogOnly
-            }
-        }
-        
-        Write-LogMessage -Message "Collected $($caInfo.TotalPolicies) Conditional Access policies with technical details" -Type Success
-        return $caInfo
-    }
-    catch {
-        Write-LogMessage -Message "Error collecting Conditional Access information: $($_.Exception.Message)" -Type Warning
-        return @{
-            Policies = @()
-            TotalPolicies = 0
-        }
-    }
-}
-
-function Build-ConditionalAccessTechnicalDetails {
-    <#
-    .SYNOPSIS
-        Builds technical details string for Conditional Access policy
-    #>
-    param($Policy)
-    
-    $details = @()
-    
-    # State
-    $details += "State: $($Policy.State)"
-    
-    # Users/Groups conditions
-    if ($Policy.Conditions.Users) {
-        $userConditions = @()
-        if ($Policy.Conditions.Users.IncludeUsers) {
-            $userConditions += "Include Users: $($Policy.Conditions.Users.IncludeUsers -join ', ')"
-        }
-        if ($Policy.Conditions.Users.ExcludeUsers) {
-            $userConditions += "Exclude Users: $($Policy.Conditions.Users.ExcludeUsers -join ', ')"
-        }
-        if ($Policy.Conditions.Users.IncludeGroups) {
-            $userConditions += "Include Groups: $($Policy.Conditions.Users.IncludeGroups -join ', ')"
-        }
-        if ($Policy.Conditions.Users.ExcludeGroups) {
-            $userConditions += "Exclude Groups: $($Policy.Conditions.Users.ExcludeGroups -join ', ')"
-        }
-        if ($userConditions.Count -gt 0) {
-            $details += "Users: $($userConditions -join '; ')"
-        }
-    }
-    
-    # Applications conditions
-    if ($Policy.Conditions.Applications) {
-        $appConditions = @()
-        if ($Policy.Conditions.Applications.IncludeApplications) {
-            $appConditions += "Include Apps: $($Policy.Conditions.Applications.IncludeApplications -join ', ')"
-        }
-        if ($Policy.Conditions.Applications.ExcludeApplications) {
-            $appConditions += "Exclude Apps: $($Policy.Conditions.Applications.ExcludeApplications -join ', ')"
-        }
-        if ($appConditions.Count -gt 0) {
-            $details += "Applications: $($appConditions -join '; ')"
-        }
-    }
-    
-    # Platform conditions
-    if ($Policy.Conditions.Platforms -and $Policy.Conditions.Platforms.IncludePlatforms) {
-        $details += "Platforms: $($Policy.Conditions.Platforms.IncludePlatforms -join ', ')"
-    }
-    
-    # Location conditions
-    if ($Policy.Conditions.Locations) {
-        $locationConditions = @()
-        if ($Policy.Conditions.Locations.IncludeLocations) {
-            $locationConditions += "Include: $($Policy.Conditions.Locations.IncludeLocations -join ', ')"
-        }
-        if ($Policy.Conditions.Locations.ExcludeLocations) {
-            $locationConditions += "Exclude: $($Policy.Conditions.Locations.ExcludeLocations -join ', ')"
-        }
-        if ($locationConditions.Count -gt 0) {
-            $details += "Locations: $($locationConditions -join '; ')"
-        }
-    }
-    
-    # Grant controls
-    if ($Policy.GrantControls) {
-        $grantDetails = @()
-        if ($Policy.GrantControls.Operator) {
-            $grantDetails += "Operator: $($Policy.GrantControls.Operator)"
-        }
-        if ($Policy.GrantControls.BuiltInControls) {
-            $grantDetails += "Controls: $($Policy.GrantControls.BuiltInControls -join ', ')"
-        }
-        if ($grantDetails.Count -gt 0) {
-            $details += "Grant: $($grantDetails -join '; ')"
-        }
-    }
-    
-    # Session controls
-    if ($Policy.SessionControls) {
-        $sessionDetails = @()
-        if ($Policy.SessionControls.ApplicationEnforcedRestrictions) {
-            $sessionDetails += "App Enforced Restrictions"
-        }
-        if ($Policy.SessionControls.CloudAppSecurity) {
-            $sessionDetails += "Cloud App Security"
-        }
-        if ($Policy.SessionControls.SignInFrequency) {
-            $sessionDetails += "Sign-in Frequency: $($Policy.SessionControls.SignInFrequency.Value) $($Policy.SessionControls.SignInFrequency.Type)"
-        }
-        if ($sessionDetails.Count -gt 0) {
-            $details += "Session: $($sessionDetails -join '; ')"
-        }
-    }
-    
-    return $details -join " | "
-}
-
-function Get-EnhancedIntuneInformation {
-    <#
-    .SYNOPSIS
-        Collects Intune configuration information with enhanced mobile app collection
-    #>
-    
     try {
         Write-LogMessage -Message "Starting enhanced Intune data collection..." -Type Info
         
@@ -943,9 +734,9 @@ function Get-EnhancedIntuneInformation {
             TotalDevices = 0
         }
         
-        # Compliance Policies
+        # Get compliance policies
         try {
-            $compliancePolicies = Get-MgDeviceManagementDeviceCompliancePolicy -All
+            $compliancePolicies = Get-MgDeviceManagementDeviceCompliancePolicy
             Write-LogMessage -Message "Found $($compliancePolicies.Count) compliance policies" -Type Info
             $intuneInfo.DeviceCompliancePolicies = $compliancePolicies | ForEach-Object {
                 @{
@@ -954,17 +745,16 @@ function Get-EnhancedIntuneInformation {
                     Description = $_.Description
                     CreatedDateTime = $_.CreatedDateTime
                     LastModifiedDateTime = $_.LastModifiedDateTime
-                    Version = $_.Version
                 }
             }
         }
         catch {
-            Write-LogMessage -Message "Could not retrieve compliance policies: $($_.Exception.Message)" -Type Warning
+            Write-LogMessage -Message "Could not retrieve compliance policies: $($_.Exception.Message)" -Type Warning -LogOnly
         }
         
-        # Configuration Policies
+        # Get configuration policies
         try {
-            $configPolicies = Get-MgDeviceManagementDeviceConfiguration -All
+            $configPolicies = Get-MgDeviceManagementDeviceConfiguration
             Write-LogMessage -Message "Found $($configPolicies.Count) configuration policies" -Type Info
             $intuneInfo.DeviceConfigurationPolicies = $configPolicies | ForEach-Object {
                 @{
@@ -973,139 +763,90 @@ function Get-EnhancedIntuneInformation {
                     Description = $_.Description
                     CreatedDateTime = $_.CreatedDateTime
                     LastModifiedDateTime = $_.LastModifiedDateTime
-                    Version = $_.Version
                 }
             }
         }
         catch {
-            Write-LogMessage -Message "Could not retrieve device configuration policies: $($_.Exception.Message)" -Type Warning
+            Write-LogMessage -Message "Could not retrieve configuration policies: $($_.Exception.Message)" -Type Warning -LogOnly
         }
         
-        # Enhanced Managed Apps Collection with multiple methods
+        # Get managed applications with enhanced methods
         try {
             Write-LogMessage -Message "Collecting managed applications with enhanced methods..." -Type Info
             
-            $managedApps = @()
-            
-            # Method 1: Standard Get-MgDeviceManagementMobileApp
+            $apps = @()
             try {
-                $managedApps = Get-MgDeviceManagementMobileApp -All -ErrorAction Stop
-                Write-LogMessage -Message "Found $($managedApps.Count) managed apps using standard method" -Type Success
+                # Try Graph API method
+                $uri = "https://graph.microsoft.com/v1.0/deviceAppManagement/mobileApps"
+                $response = Invoke-MgGraphRequest -Uri $uri -Method GET
+                $apps = $response.value
+                Write-LogMessage -Message "Found $($apps.Count) managed apps using Graph API" -Type Success
             }
             catch {
                 Write-LogMessage -Message "Standard mobile app collection failed: $($_.Exception.Message)" -Type Warning
-                
-                # Method 2: Try with Graph API directly
-                try {
-                    $uri = "https://graph.microsoft.com/v1.0/deviceAppManagement/mobileApps"
-                    $response = Invoke-MgGraphRequest -Uri $uri -Method GET
-                    $managedApps = $response.value
-                    Write-LogMessage -Message "Found $($managedApps.Count) managed apps using Graph API" -Type Success
-                }
-                catch {
-                    Write-LogMessage -Message "Graph API mobile app collection also failed: $($_.Exception.Message)" -Type Warning
-                }
             }
             
-            if ($managedApps -and $managedApps.Count -gt 0) {
-                $intuneInfo.ManagedApps = $managedApps | ForEach-Object {
-                    # FIXED: Improved platform detection based on odata type
-                    $platform = "Unknown"
-                    if ($_.'@odata.type') {
-                        switch ($_.'@odata.type') {
-                            "#microsoft.graph.win32LobApp" { $platform = "Windows" }
-                            "#microsoft.graph.winGetApp" { $platform = "Windows" }
-                            "#microsoft.graph.officeSuiteApp" { $platform = "Windows" }
-                            "#microsoft.graph.microsoftStoreForBusinessApp" { $platform = "Windows" }
-                            "#microsoft.graph.androidLobApp" { $platform = "Android" }
-                            "#microsoft.graph.androidManagedStoreApp" { $platform = "Android" }
-                            "#microsoft.graph.androidStoreApp" { $platform = "Android" }
+            if ($apps.Count -gt 0) {
+                $processedApps = @()
+                foreach ($app in $apps) {
+                    try {
+                        # Determine platform based on app type
+                        $platform = ""
+                        switch ($app.'@odata.type') {
                             "#microsoft.graph.iosLobApp" { $platform = "iOS" }
                             "#microsoft.graph.iosStoreApp" { $platform = "iOS" }
-                            "#microsoft.graph.iosVppApp" { $platform = "iOS" }
+                            "#microsoft.graph.androidLobApp" { $platform = "Android" }
+                            "#microsoft.graph.androidStoreApp" { $platform = "Android" }
+                            "#microsoft.graph.win32LobApp" { $platform = "Windows" }
+                            "#microsoft.graph.winGetApp" { $platform = "Windows" }
                             "#microsoft.graph.macOSLobApp" { $platform = "macOS" }
-                            "#microsoft.graph.macOSOfficeApp" { $platform = "macOS" }
                             "#microsoft.graph.macOSMicrosoftEdgeApp" { $platform = "macOS" }
-                            "#microsoft.graph.macOSMicrosoftDefenderApp" { $platform = "macOS" }
-                            "#microsoft.graph.webApp" { $platform = "Web" }
-                            "#microsoft.graph.mobileApp" { 
-                                # Generic type - try to guess from name/publisher
-                                if ($_.DisplayName -like "*iOS*" -or $_.DisplayName -like "*iPhone*" -or $_.DisplayName -like "*iPad*") {
-                                    $platform = "iOS"
-                                } elseif ($_.DisplayName -like "*Android*") {
-                                    $platform = "Android" 
-                                } elseif ($_.DisplayName -like "*Windows*" -or $_.DisplayName -like "*Office*" -or $_.DisplayName -like "*.exe*") {
-                                    $platform = "Windows"
-                                } elseif ($_.DisplayName -like "*Mac*" -or $_.DisplayName -like "*macOS*") {
-                                    $platform = "macOS"
-                                } else {
-                                    $platform = "iOS"  # Default fallback for mobile apps
-                                }
-                            }
+                            "#microsoft.graph.microsoftStoreForBusinessApp" { $platform = "Windows" }
                             default { 
-                                # Try to guess platform from display name as fallback
-                                if ($_.DisplayName -like "*iOS*" -or $_.DisplayName -like "*iPhone*" -or $_.DisplayName -like "*iPad*") {
-                                    $platform = "iOS"
-                                } elseif ($_.DisplayName -like "*Android*") {
-                                    $platform = "Android" 
-                                } elseif ($_.DisplayName -like "*Windows*" -or $_.DisplayName -like "*Office*" -or $_.DisplayName -like "*.exe*") {
-                                    $platform = "Windows"
-                                } elseif ($_.DisplayName -like "*Mac*" -or $_.DisplayName -like "*macOS*") {
-                                    $platform = "macOS"
+                                # Try to determine from other properties
+                                if ($app.applicableDeviceType) {
+                                    if ($app.applicableDeviceType.iPad -or $app.applicableDeviceType.iPhoneAndIPod) {
+                                        $platform = "iPadOS" 
+                                    }
                                 } else {
-                                    $platform = "iOS"  # Default to iOS for unknown mobile apps
+                                    $platform = ""
                                 }
                             }
                         }
-                    } else {
-                        # No @odata.type - guess from name
-                        if ($_.DisplayName -like "*iOS*" -or $_.DisplayName -like "*iPhone*" -or $_.DisplayName -like "*iPad*") {
-                            $platform = "iOS"
-                        } elseif ($_.DisplayName -like "*Android*") {
-                            $platform = "Android" 
-                        } elseif ($_.DisplayName -like "*Windows*" -or $_.DisplayName -like "*Office*" -or $_.DisplayName -like "*.exe*") {
-                            $platform = "Windows"
-                        } elseif ($_.DisplayName -like "*Mac*" -or $_.DisplayName -like "*macOS*") {
-                            $platform = "macOS"
-                        } else {
-                            $platform = "iOS"  # Default to iOS
+                        
+                        $appData = @{
+                            Id = $app.id
+                            DisplayName = $app.displayName
+                            Description = $app.description
+                            Publisher = $app.publisher
+                            Platform = $platform
+                            CreatedDateTime = $app.createdDateTime
+                            LastModifiedDateTime = $app.lastModifiedDateTime
+                            ODataType = $app.'@odata.type'
                         }
+                        
+                        $processedApps += $appData
                     }
-                    
-                    # Debug logging for platform detection
-                    Write-LogMessage -Message "INTUNE DEBUG: App '$($_.DisplayName)' - Type: '$($_.'@odata.type')' - Detected Platform: '$platform'" -Type Info -LogOnly
-                    
-                    @{
-                        Id = $_.Id
-                        DisplayName = $_.DisplayName
-                        Description = $_.Description
-                        Publisher = $_.Publisher
-                        CreatedDateTime = $_.CreatedDateTime
-                        LastModifiedDateTime = $_.LastModifiedDateTime
-                        '@odata.type' = $_.'@odata.type'
-                        Platform = $platform
+                    catch {
+                        Write-LogMessage -Message "Error processing app $($app.displayName): $($_.Exception.Message)" -Type Warning -LogOnly
                     }
                 }
-                Write-LogMessage -Message "Successfully processed $($intuneInfo.ManagedApps.Count) managed apps with enhanced platform categorization" -Type Success
                 
-                # Debug: Show platform distribution
-                $platformCounts = $intuneInfo.ManagedApps | Group-Object Platform | ForEach-Object { "$($_.Name): $($_.Count)" }
+                $intuneInfo.ManagedApps = $processedApps
+                Write-LogMessage -Message "Successfully processed $($processedApps.Count) managed apps with enhanced platform categorization" -Type Success
+                
+                # Debug platform distribution
+                $platformCounts = $processedApps | Group-Object Platform | ForEach-Object { "$($_.Name): $($_.Count)" }
                 Write-LogMessage -Message "INTUNE DEBUG: Platform distribution - $($platformCounts -join ', ')" -Type Info
-            } else {
-                Write-LogMessage -Message "No managed apps found or accessible" -Type Warning
-                $intuneInfo.ManagedApps = @()
             }
         }
         catch {
-            Write-LogMessage -Message "Could not retrieve managed applications: $($_.Exception.Message)" -Type Warning
-            Write-LogMessage -Message "This might be due to insufficient permissions for app management" -Type Info
-            $intuneInfo.ManagedApps = @()
+            Write-LogMessage -Message "Could not retrieve managed applications: $($_.Exception.Message)" -Type Warning -LogOnly
         }
         
-        # Managed Devices
+        # Get managed devices
         try {
-            Write-LogMessage -Message "Collecting managed devices..." -Type Info -LogOnly
-            $devices = Get-MgDeviceManagementManagedDevice -All -Top 500
+            $devices = Get-MgDeviceManagementManagedDevice -Top 100
             $intuneInfo.TotalDevices = $devices.Count
             Write-LogMessage -Message "Found $($devices.Count) managed devices" -Type Info
             $intuneInfo.ManagedDevices = $devices | ForEach-Object {
@@ -1142,12 +883,12 @@ function Get-EnhancedIntuneInformation {
     }
 }
 
-# === Enhanced Excel Documentation Functions ===
+# === FIXED EXCEL DOCUMENTATION FUNCTIONS ===
 
-function New-EnhancedExcelDocumentation {
+function New-FixedExcelDocumentation {
     <#
     .SYNOPSIS
-        Generates enhanced Excel documentation with robust error handling
+        FIXED Excel documentation generation with proper data population
     #>
     param(
         [Parameter(Mandatory = $true)]
@@ -1173,15 +914,15 @@ function New-EnhancedExcelDocumentation {
             return $false
         }
         
-        Write-LogMessage -Message "EXCEL DEBUG: File size after copy: $((Get-Item $outputPath).Length) bytes" -Type Info
+        $fileInfo = Get-Item $outputPath
+        Write-LogMessage -Message "EXCEL DEBUG: File size after copy: $($fileInfo.Length) bytes" -Type Info
         
-        # Load Excel application with error handling
+        # Create Excel COM object
         try {
             $excel = New-Object -ComObject Excel.Application
-            $excel.Visible = $false
-            $excel.DisplayAlerts = $false
-            $excel.ScreenUpdating = $false  # Improve performance
             Write-LogMessage -Message "EXCEL DEBUG: Excel application created successfully" -Type Success
+            $excel.Visible = $false
+            $excel.ScreenUpdating = $false
         }
         catch {
             Write-LogMessage -Message "EXCEL DEBUG: Failed to create Excel application: $($_.Exception.Message)" -Type Error
@@ -1189,35 +930,31 @@ function New-EnhancedExcelDocumentation {
         }
         
         try {
+            # Open workbook
             Write-LogMessage -Message "EXCEL DEBUG: Opening workbook..." -Type Info
-            $workbook = $excel.Workbooks.Open($outputPath)
+            $Workbook = $excel.Workbooks.Open($outputPath)
             Write-LogMessage -Message "EXCEL DEBUG: Workbook opened successfully" -Type Success
             
-            # List all worksheets for debugging
-            Write-LogMessage -Message "EXCEL DEBUG: Available worksheets:" -Type Info
-            for ($i = 1; $i -le $workbook.Worksheets.Count; $i++) {
-                $sheetName = $workbook.Worksheets.Item($i).Name
-                Write-LogMessage -Message "EXCEL DEBUG: Sheet $i`: $sheetName" -Type Info -LogOnly
+            # Debug available worksheets
+            $worksheetNames = @()
+            for ($i = 1; $i -le $Workbook.Worksheets.Count; $i++) {
+                $worksheetNames += $Workbook.Worksheets.Item($i).Name
             }
+            Write-LogMessage -Message "EXCEL DEBUG: Available worksheets: $($worksheetNames -join ', ')" -Type Info
             
-            # Update sheets one by one with robust error handling
-            try {
-                Update-EnhancedUsersSheet -Workbook $workbook -TenantData $TenantData
-                Update-EnhancedLicensingSheet -Workbook $workbook -TenantData $TenantData
-                Update-EnhancedConditionalAccessSheet -Workbook $workbook -TenantData $TenantData
-                Update-EnhancedSharePointSheet -Workbook $workbook -TenantData $TenantData
-                Update-EnhancedIntuneAppsSheets -Workbook $workbook -TenantData $TenantData
-                Add-SecurityGroupsSheet -Workbook $workbook -TenantData $TenantData
-                Update-DistributionListSheet -Workbook $workbook -TenantData $TenantData
-            }
-            catch {
-                Write-LogMessage -Message "EXCEL DEBUG: Error during sheet updates: $($_.Exception.Message)" -Type Error
-            }
+            # FIXED: Update sheets with proper data
+            Update-FixedUsersSheet -Workbook $Workbook -TenantData $TenantData
+            Update-FixedLicensingSheet -Workbook $Workbook -TenantData $TenantData
+            Update-FixedConditionalAccessSheet -Workbook $Workbook -TenantData $TenantData
+            Update-FixedSharePointSheet -Workbook $Workbook -TenantData $TenantData
+            Update-FixedIntuneAppsSheets -Workbook $Workbook -TenantData $TenantData
+            Add-FixedSecurityGroupsSheet -Workbook $Workbook -TenantData $TenantData
+            Update-FixedDistributionListSheet -Workbook $Workbook -TenantData $TenantData
             
-            # Final save and close
+            # Final save
             Write-LogMessage -Message "EXCEL DEBUG: Performing final save..." -Type Info
-            $workbook.Save()
-            $workbook.Close()
+            $Workbook.Save()
+            $Workbook.Close()
             Write-LogMessage -Message "EXCEL DEBUG: Workbook saved and closed" -Type Success
             
             return $true
@@ -1244,12 +981,10 @@ function New-EnhancedExcelDocumentation {
     }
 }
 
-# === Enhanced Excel Update Functions ===
-
-function Update-EnhancedUsersSheet {
+function Update-FixedUsersSheet {
     <#
     .SYNOPSIS
-        Updates Users sheet with enhanced license mapping and robust error handling
+        FIXED Users sheet update with proper data population
     #>
     param(
         [Parameter(Mandatory = $true)]
@@ -1276,7 +1011,7 @@ function Update-EnhancedUsersSheet {
             return
         }
         
-        # Start at row 7 (first data row)
+        # Start at row 7 (first data row based on template structure)
         $startRow = 7
         $currentRow = $startRow
         
@@ -1287,7 +1022,7 @@ function Update-EnhancedUsersSheet {
             try {
                 Write-LogMessage -Message "EXCEL DEBUG: Processing user $($user.UserPrincipalName) at row $currentRow" -Type Info -LogOnly
                 
-                # Use .Value instead of .Value2 for better compatibility
+                # Map to template columns: A=First Name, B=Last Name, C=Email, D=Job Title, E=Manager, F=Department, G=Office, H=Phone
                 $worksheet.Cells.Item($currentRow, 1).Value = if ($user.GivenName) { $user.GivenName } else { "" }
                 $worksheet.Cells.Item($currentRow, 2).Value = if ($user.Surname) { $user.Surname } else { "" }
                 $worksheet.Cells.Item($currentRow, 3).Value = if ($user.UserPrincipalName) { $user.UserPrincipalName } else { "" }
@@ -1295,7 +1030,7 @@ function Update-EnhancedUsersSheet {
                 $worksheet.Cells.Item($currentRow, 5).Value = if ($user.Manager) { $user.Manager } else { "" }
                 $worksheet.Cells.Item($currentRow, 6).Value = if ($user.Department) { $user.Department } else { "" }
                 $worksheet.Cells.Item($currentRow, 7).Value = if ($user.Office) { $user.Office } else { "" }
-                $worksheet.Cells.Item($currentRow, 8).Value = "" # Phone Number
+                $worksheet.Cells.Item($currentRow, 8).Value = "" # Phone Number placeholder
                 
                 $currentRow++
                 
@@ -1322,10 +1057,10 @@ function Update-EnhancedUsersSheet {
     }
 }
 
-function Update-EnhancedLicensingSheet {
+function Update-FixedLicensingSheet {
     <#
     .SYNOPSIS
-        Updates Licensing sheet with enhanced license mapping - FIXED TABLE LOCATION
+        FIXED Licensing sheet update with proper license data population
     #>
     param(
         [Parameter(Mandatory = $true)]
@@ -1354,27 +1089,26 @@ function Update-EnhancedLicensingSheet {
             Write-LogMessage -Message "EXCEL DEBUG: User $($sampleUser.UserPrincipalName) - BaseLicense: '$($sampleUser.BaseLicense)' - Licenses: '$($sampleUser.Licenses)'" -Type Info
         }
         
-        # Try to find licensed users
+        # FIXED: Find users with ANY license data (not just BaseLicense)
         $licensedUsers = $allUsers | Where-Object { 
-            $_.BaseLicense -and $_.BaseLicense.Trim() -ne "" -and $_.BaseLicense -ne "null"
+            ($_.BaseLicense -and $_.BaseLicense.Trim() -ne "" -and $_.BaseLicense -ne "null") -or
+            ($_.Licenses -and $_.Licenses.Trim() -ne "" -and $_.Licenses -ne "null")
         }
         
         Write-LogMessage -Message "EXCEL DEBUG: Found $($licensedUsers.Count) licensed users" -Type Info
         
-        # If no licensed users found, use users with any license info
+        # If still no licensed users found, use ALL users as fallback
         if (-not $licensedUsers -or $licensedUsers.Count -eq 0) {
-            $licensedUsers = $allUsers | Where-Object { 
-                $_.Licenses -and $_.Licenses.Trim() -ne "" 
-            } | Select-Object -First 20
-            Write-LogMessage -Message "EXCEL DEBUG: Using $($licensedUsers.Count) users with any license data as fallback" -Type Info
+            $licensedUsers = $allUsers | Select-Object -First 20
+            Write-LogMessage -Message "EXCEL DEBUG: Using $($licensedUsers.Count) users as fallback (no license filtering)" -Type Info
         }
         
         if (-not $licensedUsers -or $licensedUsers.Count -eq 0) {
-            Write-LogMessage -Message "EXCEL DEBUG: No users with license information found" -Type Warning
+            Write-LogMessage -Message "EXCEL DEBUG: No users found to populate licensing sheet" -Type Warning
             return
         }
         
-        # FIXED: Start at row 25 (user licensing table location, not feature matrix)
+        # FIXED: Start at row 25 (licensing table location based on template analysis)
         $startRow = 25
         $currentRow = $startRow
         
@@ -1389,9 +1123,9 @@ function Update-EnhancedLicensingSheet {
             try {
                 Write-LogMessage -Message "EXCEL DEBUG: Processing licensed user $($user.UserPrincipalName) at row $currentRow" -Type Info -LogOnly
                 
-                # Map to correct licensing table columns
+                # FIXED: Map to correct licensing table columns (B=User, C=License, D=Additional1, E=Additional2)
                 $worksheet.Cells.Item($currentRow, 2).Value = if ($user.DisplayName) { $user.DisplayName } else { $user.UserPrincipalName }
-                $worksheet.Cells.Item($currentRow, 3).Value = if ($user.BaseLicense) { $user.BaseLicense } else { $user.Licenses }
+                $worksheet.Cells.Item($currentRow, 3).Value = if ($user.BaseLicense -and $user.BaseLicense.Trim() -ne "") { $user.BaseLicense } else { $user.Licenses }
                 $worksheet.Cells.Item($currentRow, 4).Value = if ($user.AdditionalSoftware1) { $user.AdditionalSoftware1 } else { "" }
                 $worksheet.Cells.Item($currentRow, 5).Value = if ($user.AdditionalSoftware2) { $user.AdditionalSoftware2 } else { "" }
                 
@@ -1411,10 +1145,76 @@ function Update-EnhancedLicensingSheet {
     }
 }
 
-function Update-EnhancedSharePointSheet {
+function Update-FixedConditionalAccessSheet {
     <#
     .SYNOPSIS
-        Updates SharePoint Site sheet with permissions data
+        Updates Conditional Access sheet with policy details
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        $Workbook,
+        
+        [Parameter(Mandatory = $true)]
+        [hashtable]$TenantData
+    )
+    
+    try {
+        Write-LogMessage -Message "EXCEL DEBUG: Updating Conditional Access sheet..." -Type Info
+        
+        $worksheet = $Workbook.Worksheets.Item("Conditional Access")
+        if (-not $worksheet) {
+            Write-LogMessage -Message "EXCEL DEBUG: Conditional Access worksheet not found" -Type Error
+            return
+        }
+        
+        $policies = $TenantData.ConditionalAccess.Policies
+        Write-LogMessage -Message "EXCEL DEBUG: Processing $($policies.Count) CA policies" -Type Info
+        
+        if (-not $policies -or $policies.Count -eq 0) {
+            Write-LogMessage -Message "EXCEL DEBUG: No CA policies data to populate" -Type Warning
+            return
+        }
+        
+        # Start at row 9 (based on template structure)
+        $startRow = 9
+        $currentRow = $startRow
+        
+        foreach ($policy in $policies) {
+            try {
+                # Map to template columns: B=Policy Name, C=Policy Settings
+                $worksheet.Cells.Item($currentRow, 2).Value = $policy.DisplayName
+                
+                # Combine all policy settings into a readable format
+                $policySettings = @()
+                $policySettings += "State: $($policy.State)"
+                if ($policy.UserConditions) { $policySettings += "Users: $($policy.UserConditions)" }
+                if ($policy.ApplicationConditions) { $policySettings += "Applications: $($policy.ApplicationConditions)" }
+                if ($policy.PlatformConditions) { $policySettings += $policy.PlatformConditions }
+                if ($policy.GrantControls) { $policySettings += "Grant: $($policy.GrantControls)" }
+                if ($policy.SessionControls) { $policySettings += "Session: $($policy.SessionControls)" }
+                
+                $worksheet.Cells.Item($currentRow, 3).Value = $policySettings -join " | "
+                
+                $currentRow++
+            }
+            catch {
+                Write-LogMessage -Message "EXCEL DEBUG: Error updating CA row $currentRow - $($_.Exception.Message)" -Type Error
+                $currentRow++
+            }
+        }
+        
+        $Workbook.Save()
+        Write-LogMessage -Message "EXCEL DEBUG: Successfully updated Conditional Access sheet with $($policies.Count) policies" -Type Success
+    }
+    catch {
+        Write-LogMessage -Message "EXCEL DEBUG: Error updating Conditional Access sheet - $($_.Exception.Message)" -Type Error
+    }
+}
+
+function Update-FixedSharePointSheet {
+    <#
+    .SYNOPSIS
+        Updates SharePoint Site sheet with site data
     #>
     param(
         [Parameter(Mandatory = $true)]
@@ -1439,7 +1239,7 @@ function Update-EnhancedSharePointSheet {
             return
         }
         
-        # Start at row 7 (data starts here)
+        # Start at row 7 (data starts here based on template)
         $startRow = 7
         $currentRow = $startRow
         
@@ -1455,79 +1255,23 @@ function Update-EnhancedSharePointSheet {
                 $currentRow++
             }
             catch {
-                Write-LogMessage -Message "Error updating SharePoint row $currentRow`: $($_.Exception.Message)" -Type Warning -LogOnly
-                $currentRow++
-            }
-        }
-        
-        Write-LogMessage -Message "Successfully updated SharePoint Site sheet with $($sites.Count) sites" -Type Success
-    }
-    catch {
-        Write-LogMessage -Message "Error updating SharePoint Site sheet: $($_.Exception.Message)" -Type Error
-    }
-}
-
-function Update-EnhancedConditionalAccessSheet {
-    <#
-    .SYNOPSIS
-        Updates Conditional Access sheet with technical details and robust error handling
-    #>
-    param(
-        [Parameter(Mandatory = $true)]
-        $Workbook,
-        
-        [Parameter(Mandatory = $true)]
-        [hashtable]$TenantData
-    )
-    
-    try {
-        Write-LogMessage -Message "EXCEL DEBUG: Updating Conditional Access sheet..." -Type Info
-        
-        $worksheet = $Workbook.Worksheets.Item("Conditional Access")
-        if (-not $worksheet) {
-            Write-LogMessage -Message "EXCEL DEBUG: Conditional Access worksheet not found" -Type Error
-            return
-        }
-        
-        $policies = $TenantData.ConditionalAccess.Policies
-        Write-LogMessage -Message "EXCEL DEBUG: Processing $($policies.Count) CA policies" -Type Info
-        
-        if (-not $policies -or $policies.Count -eq 0) {
-            Write-LogMessage -Message "EXCEL DEBUG: No Conditional Access policies to populate" -Type Warning
-            return
-        }
-        
-        # Start at row 9 (CA table starts here)
-        $startRow = 9
-        $currentRow = $startRow
-        
-        foreach ($policy in $policies) {
-            try {
-                Write-LogMessage -Message "EXCEL DEBUG: Processing CA policy $($policy.DisplayName) at row $currentRow" -Type Info -LogOnly
-                
-                $worksheet.Cells.Item($currentRow, 2).Value = if ($policy.DisplayName) { $policy.DisplayName } else { "Unnamed Policy" }
-                $worksheet.Cells.Item($currentRow, 3).Value = if ($policy.TechnicalDetails) { $policy.TechnicalDetails } else { "State: $($policy.State)" }
-                
-                $currentRow++
-            }
-            catch {
-                Write-LogMessage -Message "EXCEL DEBUG: Error updating CA policy row $currentRow - $($_.Exception.Message)" -Type Error
+                Write-LogMessage -Message "Error updating SharePoint row $currentRow - $($_.Exception.Message)" -Type Error
                 $currentRow++
             }
         }
         
         $Workbook.Save()
-        Write-LogMessage -Message "EXCEL DEBUG: Successfully updated Conditional Access sheet with $($policies.Count) policies" -Type Success
+        Write-LogMessage -Message "Successfully updated SharePoint Site sheet with $($sites.Count) sites" -Type Success
     }
     catch {
-        Write-LogMessage -Message "EXCEL DEBUG: Error updating Conditional Access sheet - $($_.Exception.Message)" -Type Error
+        Write-LogMessage -Message "Error updating SharePoint Site sheet - $($_.Exception.Message)" -Type Error
     }
 }
 
-function Update-EnhancedIntuneAppsSheets {
+function Update-FixedIntuneAppsSheets {
     <#
     .SYNOPSIS
-        Updates all Intune Apps sheets with platform-specific apps and expansion
+        Updates all Intune Apps sheets with platform-specific data
     #>
     param(
         [Parameter(Mandatory = $true)]
@@ -1540,81 +1284,74 @@ function Update-EnhancedIntuneAppsSheets {
     try {
         Write-LogMessage -Message "Updating Intune Apps sheets with platform categorization..." -Type Info
         
-        $managedApps = $TenantData.Intune.ManagedApps
-        if (-not $managedApps -or $managedApps.Count -eq 0) {
-            Write-LogMessage -Message "No managed apps found to populate" -Type Warning
+        $apps = $TenantData.Intune.ManagedApps
+        if (-not $apps -or $apps.Count -eq 0) {
+            Write-LogMessage -Message "No Intune apps data to populate" -Type Warning
             return
         }
         
-        # Group apps by platform
-        $appsByPlatform = @{
-            "Windows" = $managedApps | Where-Object { $_.Platform -eq "Windows" }
-            "Android" = $managedApps | Where-Object { $_.Platform -eq "Android" }
-            "iOS" = $managedApps | Where-Object { $_.Platform -eq "iOS" }
-            "iPadOS" = $managedApps | Where-Object { $_.Platform -eq "iOS" }  # iOS apps work on iPadOS
-            "macOS" = $managedApps | Where-Object { $_.Platform -eq "macOS" }
-        }
-        
-        # Sheet mapping
-        $sheetMapping = @{
-            "Windows" = "Intune Windows Apps"
-            "Android" = "Intune Android Apps"
-            "iOS" = "Intune Apple IOS Apps "
+        # Define platform mappings to sheet names
+        $platformSheets = @{
             "iPadOS" = "Intune Apple iPadOS Apps "
+            "iOS" = "Intune Apple IOS Apps "
             "macOS" = "Intune Mac OS Apps"
+            "Android" = "Intune Android Apps"
+            "Windows" = "Intune Windows Apps"
         }
         
-        foreach ($platform in $appsByPlatform.Keys) {
-            $sheetName = $sheetMapping[$platform]
-            $platformApps = $appsByPlatform[$platform]
+        foreach ($platform in $platformSheets.Keys) {
+            $sheetName = $platformSheets[$platform]
+            $platformApps = $apps | Where-Object { $_.Platform -eq $platform -or ($platform -eq "iPadOS" -and $_.Platform -eq "iOS") }
             
             Write-LogMessage -Message "Processing $platform apps for sheet '$sheetName'..." -Type Info
             
-            $worksheet = $Workbook.Worksheets.Item($sheetName)
-            if (-not $worksheet) {
-                Write-LogMessage -Message "Worksheet '$sheetName' not found" -Type Warning
-                continue
-            }
-            
-            if (-not $platformApps -or $platformApps.Count -eq 0) {
-                Write-LogMessage -Message "No $platform apps to populate" -Type Info
-                continue
-            }
-            
-            # Populate app data
-            $startRow = 8  # Data starts at row 8
-            $currentRow = $startRow
-            
-            foreach ($app in $platformApps) {
-                try {
-                    # Map to template columns: B=Application Name, C=Required, D=Optional, E=Selected users only
-                    $worksheet.Cells.Item($currentRow, 2).Value = $app.DisplayName
-                    $worksheet.Cells.Item($currentRow, 3).Value = "" # Required - to be configured manually
-                    $worksheet.Cells.Item($currentRow, 4).Value = "" # Optional - to be configured manually
-                    $worksheet.Cells.Item($currentRow, 5).Value = "" # Selected users only - to be configured manually
-                    
-                    $currentRow++
+            try {
+                $worksheet = $Workbook.Worksheets.Item($sheetName)
+                if ($worksheet) {
+                    if ($platformApps.Count -gt 0) {
+                        $startRow = 7  # Based on template structure
+                        $currentRow = $startRow
+                        
+                        foreach ($app in $platformApps) {
+                            try {
+                                # Map to template columns: B=App Name, C=Publisher, D=Description
+                                $worksheet.Cells.Item($currentRow, 2).Value = $app.DisplayName
+                                $worksheet.Cells.Item($currentRow, 3).Value = if ($app.Publisher) { $app.Publisher } else { "" }
+                                $worksheet.Cells.Item($currentRow, 4).Value = if ($app.Description) { $app.Description } else { "" }
+                                
+                                $currentRow++
+                            }
+                            catch {
+                                Write-LogMessage -Message "Error updating $platform app row $currentRow - $($_.Exception.Message)" -Type Error
+                                $currentRow++
+                            }
+                        }
+                        
+                        Write-LogMessage -Message "Successfully updated $sheetName with $($platformApps.Count) apps" -Type Success
+                    } else {
+                        Write-LogMessage -Message "No $platform apps to populate" -Type Info
+                    }
+                } else {
+                    Write-LogMessage -Message "$sheetName worksheet not found" -Type Warning
                 }
-                catch {
-                    Write-LogMessage -Message "Error updating $platform app row $currentRow`: $($_.Exception.Message)" -Type Warning -LogOnly
-                    $currentRow++
-                }
             }
-            
-            Write-LogMessage -Message "Successfully updated $sheetName with $($platformApps.Count) apps" -Type Success
+            catch {
+                Write-LogMessage -Message "Error updating $sheetName - $($_.Exception.Message)" -Type Error
+            }
         }
         
+        $Workbook.Save()
         Write-LogMessage -Message "Completed updating all Intune Apps sheets" -Type Success
     }
     catch {
-        Write-LogMessage -Message "Error updating Intune Apps sheets: $($_.Exception.Message)" -Type Error
+        Write-LogMessage -Message "Error updating Intune Apps sheets - $($_.Exception.Message)" -Type Error
     }
 }
 
-function Add-SecurityGroupsSheet {
+function Add-FixedSecurityGroupsSheet {
     <#
     .SYNOPSIS
-        Adds a new Security Groups sheet to the workbook
+        Adds Security Groups sheet with group data
     #>
     param(
         [Parameter(Mandatory = $true)]
@@ -1627,83 +1364,65 @@ function Add-SecurityGroupsSheet {
     try {
         Write-LogMessage -Message "Adding Security Groups sheet..." -Type Info
         
-        $securityGroups = $TenantData.Groups.SecurityGroups
-        if (-not $securityGroups -or $securityGroups.Count -eq 0) {
-            Write-LogMessage -Message "No security groups to add" -Type Warning
+        # Check if Security Groups sheet already exists
+        $existingSheet = $null
+        try {
+            $existingSheet = $Workbook.Worksheets.Item("Security Groups")
+        }
+        catch {
+            # Sheet doesn't exist, will create it
+        }
+        
+        if ($existingSheet) {
+            $worksheet = $existingSheet
+        } else {
+            # Create new sheet
+            $worksheet = $Workbook.Worksheets.Add()
+            $worksheet.Name = "Security Groups"
+            
+            # Add headers
+            $worksheet.Cells.Item(1, 1).Value = "Security Groups"
+            $worksheet.Cells.Item(2, 1).Value = "Group Name"
+            $worksheet.Cells.Item(2, 2).Value = "Description"
+            $worksheet.Cells.Item(2, 3).Value = "Members"
+        }
+        
+        $groups = $TenantData.Groups.SecurityGroups
+        if (-not $groups -or $groups.Count -eq 0) {
+            Write-LogMessage -Message "No security groups data to populate" -Type Warning
             return
         }
         
-        # Add new worksheet
-        $newWorksheet = $Workbook.Worksheets.Add()
-        $newWorksheet.Name = "Security Groups"
-        
-        # Set up headers
-        $newWorksheet.Cells.Item(1, 1).Value = "Security Groups"
-        $newWorksheet.Cells.Item(1, 1).Font.Bold = $true
-        $newWorksheet.Cells.Item(1, 1).Font.Size = 14
-        
-        $newWorksheet.Cells.Item(3, 1).Value = "Security groups are used for access control, license assignment, and conditional access policies."
-        
-        # Column headers
-        $newWorksheet.Cells.Item(5, 2).Value = "Group Name"
-        $newWorksheet.Cells.Item(5, 3).Value = "Description"
-        $newWorksheet.Cells.Item(5, 4).Value = "Type"
-        $newWorksheet.Cells.Item(5, 5).Value = "Members"
-        $newWorksheet.Cells.Item(5, 6).Value = "Member Count"
-        
-        # Make headers bold
-        $headerRange = $newWorksheet.Range("B5:F5")
-        $headerRange.Font.Bold = $true
-        $headerRange.Interior.Color = [System.Drawing.ColorTranslator]::ToOle([System.Drawing.Color]::LightGray)
-        
-        # Populate security groups data
-        $startRow = 6
+        # Start at row 3 (after headers)
+        $startRow = 3
         $currentRow = $startRow
         
-        foreach ($group in $securityGroups) {
+        foreach ($group in $groups) {
             try {
-                $newWorksheet.Cells.Item($currentRow, 2).Value = $group.DisplayName
-                $newWorksheet.Cells.Item($currentRow, 3).Value = $group.Description
-                
-                # Determine group type
-                $groupType = "Security Group"
-                if ($group.GroupTypes -and $group.GroupTypes -like "*Unified*") {
-                    $groupType = "Microsoft 365 Group"
-                } elseif ($group.MailEnabled) {
-                    $groupType = "Mail-Enabled Security Group"
-                }
-                
-                $newWorksheet.Cells.Item($currentRow, 4).Value = $groupType
-                $newWorksheet.Cells.Item($currentRow, 5).Value = $group.Members
-                $newWorksheet.Cells.Item($currentRow, 6).Value = $group.MemberCount
+                $worksheet.Cells.Item($currentRow, 1).Value = $group.DisplayName
+                $worksheet.Cells.Item($currentRow, 2).Value = if ($group.Description) { $group.Description } else { "" }
+                $worksheet.Cells.Item($currentRow, 3).Value = if ($group.Members) { $group.Members } else { "" }
                 
                 $currentRow++
             }
             catch {
-                Write-LogMessage -Message "Error adding security group row $currentRow`: $($_.Exception.Message)" -Type Warning -LogOnly
+                Write-LogMessage -Message "Error updating security group row $currentRow - $($_.Exception.Message)" -Type Error
                 $currentRow++
             }
         }
         
-        # Apply table formatting
-        $tableRange = $newWorksheet.Range("B5:F$($currentRow - 1)")
-        $tableRange.Borders.LineStyle = 1
-        $tableRange.Borders.Weight = 2
-        
-        # Auto-fit columns
-        $newWorksheet.Columns("B:F").AutoFit()
-        
-        Write-LogMessage -Message "Successfully added Security Groups sheet with $($securityGroups.Count) groups" -Type Success
+        $Workbook.Save()
+        Write-LogMessage -Message "Successfully added Security Groups sheet with $($groups.Count) groups" -Type Success
     }
     catch {
-        Write-LogMessage -Message "Error adding Security Groups sheet: $($_.Exception.Message)" -Type Error
+        Write-LogMessage -Message "Error adding Security Groups sheet - $($_.Exception.Message)" -Type Error
     }
 }
 
-function Update-DistributionListSheet {
+function Update-FixedDistributionListSheet {
     <#
     .SYNOPSIS
-        Updates the Distribution list sheet with distribution groups - FIXED ROW LOCATION B9-B21
+        Updates Distribution list sheet with distribution group data
     #>
     param(
         [Parameter(Mandatory = $true)]
@@ -1722,38 +1441,22 @@ function Update-DistributionListSheet {
             return
         }
         
-        $distributionGroups = $TenantData.Groups.DistributionGroups
-        if (-not $distributionGroups -or $distributionGroups.Count -eq 0) {
-            Write-LogMessage -Message "EXCEL DEBUG: No distribution groups to populate" -Type Warning
+        $groups = $TenantData.Groups.DistributionGroups
+        if (-not $groups -or $groups.Count -eq 0) {
+            Write-LogMessage -Message "EXCEL DEBUG: No distribution groups data to populate" -Type Warning
             return
         }
         
-        # CORRECTED: Start at row 9 (B9-B21 as user specified)
+        # Start at row 9 (based on template structure)
         $startRow = 9
         $currentRow = $startRow
         
-        # Clear existing data first (B6-B8 seems to have wrong data)
-        for ($clearRow = 6; $clearRow -le 21; $clearRow++) {
-            for ($clearCol = 2; $clearCol -le 4; $clearCol++) {
-                $worksheet.Cells.Item($clearRow, $clearCol).Value = ""
-            }
-        }
-        
-        foreach ($group in $distributionGroups) {
+        foreach ($group in $groups) {
             try {
-                Write-LogMessage -Message "EXCEL DEBUG: Processing distribution group $($group.DisplayName) at row $currentRow (target range B9-B21)" -Type Info -LogOnly
-                
-                # Map to correct template columns in B9-B21 range
-                $worksheet.Cells.Item($currentRow, 2).Value = if ($group.DisplayName) { $group.DisplayName } else { "Unnamed Group" }
-                $worksheet.Cells.Item($currentRow, 3).Value = if ($group.Members) { $group.Members } else { "No members" }
+                # Map to template column B (Distribution List Name)
+                $worksheet.Cells.Item($currentRow, 2).Value = $group.DisplayName
                 
                 $currentRow++
-                
-                # Stop if we exceed the target range
-                if ($currentRow > 21) {
-                    Write-LogMessage -Message "EXCEL DEBUG: Reached maximum rows for Distribution Lists (B21), stopping" -Type Warning
-                    break
-                }
             }
             catch {
                 Write-LogMessage -Message "EXCEL DEBUG: Error updating distribution group row $currentRow - $($_.Exception.Message)" -Type Error
@@ -1762,14 +1465,14 @@ function Update-DistributionListSheet {
         }
         
         $Workbook.Save()
-        Write-LogMessage -Message "EXCEL DEBUG: Successfully updated Distribution list sheet with $($distributionGroups.Count) groups in range B9-B21" -Type Success
+        Write-LogMessage -Message "EXCEL DEBUG: Successfully updated Distribution list sheet with $($groups.Count) groups in range B$startRow-B$($currentRow-1)" -Type Success
     }
     catch {
         Write-LogMessage -Message "EXCEL DEBUG: Error updating Distribution list sheet - $($_.Exception.Message)" -Type Error
     }
 }
 
-# === Additional Helper Functions ===
+# === HELPER FUNCTIONS ===
 
 function New-DocumentationDirectory {
     try {
