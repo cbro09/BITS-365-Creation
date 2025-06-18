@@ -3,9 +3,63 @@
 
 function New-TenantCAPolices {
     Write-LogMessage -Message "Starting CA policy creation process..." -Type Info
-    Import-RequiredGraphModules
     
     try {
+        # STEP 1: Store core functions to prevent them being cleared
+        $writeLogFunction = ${function:Write-LogMessage}
+        $testNotEmptyFunction = ${function:Test-NotEmpty}
+        $showProgressFunction = ${function:Show-Progress}
+        
+        # STEP 2: Remove ALL Graph modules first to avoid conflicts
+        Write-LogMessage -Message "Clearing all Graph modules to prevent conflicts..." -Type Info
+        Get-Module Microsoft.Graph* | Remove-Module -Force -ErrorAction SilentlyContinue
+        
+        # STEP 3: Restore core functions
+        ${function:Write-LogMessage} = $writeLogFunction
+        ${function:Test-NotEmpty} = $testNotEmptyFunction
+        ${function:Show-Progress} = $showProgressFunction
+        
+        # STEP 4: Disconnect any existing sessions
+        try {
+            Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+        }
+        catch {
+            # Ignore disconnect errors
+        }
+        
+        # STEP 5: Force load ONLY the exact modules needed for ConditionalAccess
+        $conditionalAccessModules = @(
+            'Microsoft.Graph.Identity.DirectoryManagement',
+            'Microsoft.Graph.Groups',
+            'Microsoft.Graph.Identity.SignIns'
+        )
+        
+        Write-LogMessage -Message "Loading ONLY ConditionalAccess modules in exact order..." -Type Info
+        foreach ($module in $conditionalAccessModules) {
+            try {
+                Get-Module $module | Remove-Module -Force -ErrorAction SilentlyContinue
+                Import-Module -Name $module -Force -ErrorAction Stop
+                $moduleInfo = Get-Module $module
+                Write-LogMessage -Message "Loaded $module version $($moduleInfo.Version)" -Type Success -LogOnly
+            }
+            catch {
+                Write-LogMessage -Message "Failed to load $module module - $($_.Exception.Message)" -Type Error
+                return $false
+            }
+        }
+        
+        # STEP 6: Connect with EXACT scopes needed for ConditionalAccess
+        $conditionalAccessScopes = @(
+            "Policy.ReadWrite.ConditionalAccess",
+            "Group.ReadWrite.All",
+            "Directory.ReadWrite.All"
+        )
+        
+        Write-LogMessage -Message "Connecting to Microsoft Graph with ConditionalAccess scopes..." -Type Info
+        Connect-MgGraph -Scopes $conditionalAccessScopes -ErrorAction Stop | Out-Null
+        
+        $context = Get-MgContext
+        Write-LogMessage -Message "Connected to Microsoft Graph as $($context.Account)" -Type Success
         # Check for NoMFA Exemption group ID
         $noMfaGroupId = $script:TenantState.CreatedGroups["NoMFA Exemption"]
         if (-not $noMfaGroupId) {
