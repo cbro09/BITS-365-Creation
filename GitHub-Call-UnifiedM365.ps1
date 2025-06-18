@@ -574,25 +574,43 @@ function Start-Setup {
                 Read-Host "Press Enter to continue"
             }
             3 {
-                # Configure CA policies
-                if (-not (Get-MgContext)) {
-                    Write-LogMessage -Message "Not connected to Microsoft Graph. Please connect first." -Type Warning
+    # Configure CA policies
+    if (-not (Get-MgContext)) {
+        Write-LogMessage -Message "Not connected to Microsoft Graph. Please connect first." -Type Warning
+    }
+    elseif (-not $script:TenantState -or -not $script:TenantState.CreatedGroups) {
+        Write-LogMessage -Message "Groups not created yet. Please create groups first." -Type Warning
+    }
+    else {
+        $moduleLoaded = Import-ModuleFromCache -ModuleName "ConditionalAccess"
+        if ($moduleLoaded) {
+            Write-LogMessage -Message "Executing ConditionalAccess module directly..." -Type Info
+            try {
+                $fileName = $GitHubConfig.ModuleFiles["ConditionalAccess"]
+                $localPath = Join-Path -Path $GitHubConfig.CacheDirectory -ChildPath $fileName
+                
+                $result = & {
+                    . $localPath
+                    New-TenantCAPolices
                 }
-                elseif (-not $script:TenantState -or -not $script:TenantState.CreatedGroups) {
-                    Write-LogMessage -Message "Groups not created yet. Please create groups first." -Type Warning
+                
+                if ($result) {
+                    Write-LogMessage -Message "ConditionalAccess completed successfully" -Type Success
                 }
                 else {
-                    $moduleLoaded = Import-ModuleFromCache -ModuleName "ConditionalAccess"
-                    if ($moduleLoaded) {
-                        $policiesCreated = New-TenantCAPolices
-                    }
-                    else {
-                        Write-LogMessage -Message "Failed to load Conditional Access module. Please check your internet connection." -Type Error
-                    }
+                    Write-LogMessage -Message "ConditionalAccess returned false - check logs for details" -Type Warning
                 }
-                Read-Host "Press Enter to continue"
             }
-            # Replace Case 4 in your main script with this:
+            catch {
+                Write-LogMessage -Message "ConditionalAccess failed: $($_.Exception.Message)" -Type Error
+            }
+        }
+        else {
+            Write-LogMessage -Message "Failed to load ConditionalAccess module. Please check your internet connection." -Type Error
+        }
+    }
+    Read-Host "Press Enter to continue"
+}
 
 4 {
     # Set up SharePoint
