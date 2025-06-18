@@ -140,6 +140,10 @@ function New-TenantIntune {
         $policies += New-OutlookPolicy
         $policies += New-DisableUACPolicy
         
+Write-LogMessage -Message "Starting compliance policy creation..." -Type Info
+        $compliancePolicies = New-CompliancePolicies
+        Write-LogMessage -Message "Compliance policy creation completed" -Type Success
+
         # Separate newly created policies from existing ones
         $newPolicies = $policies | Where-Object { $_ -and $_.id -and $_.id -ne "existing" }
         $existingPolicyNames = ($policies | Where-Object { $_ -and $_.id -eq "existing" }).name
@@ -170,6 +174,25 @@ foreach ($policy in $newPolicies) {
         Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$($policy.id)/assignments" -Body $body
         Write-LogMessage -Message "Assigned '$($policy.name)' to WindowsAutoPilot group" -Type Success
     }
+
+    Write-LogMessage -Message "Assigning compliance policies to WindowsAutoPilot group..." -Type Info
+foreach ($policy in $compliancePolicies) {
+    if ($policy -and $policy.id -ne "existing") {
+        try {
+            $body = @{
+                assignments = @(
+                    @{
+                        target = @{
+                            "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
+                            groupId = $autoPilotGroupId
+                        }
+                    }
+                )
+            }
+            
+            Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies/$($policy.id)/assignments" -Body $body
+            Write-LogMessage -Message "Assigned compliance policy '$($policy.displayName)' to WindowsAutoPilot group" -Type Success
+        }
     catch {
         # Try the assign action endpoint as fallback
         try {
