@@ -60,37 +60,45 @@ function New-TenantCAPolices {
         
         $context = Get-MgContext
         Write-LogMessage -Message "Connected to Microsoft Graph as $($context.Account)" -Type Success
-        # Check for NoMFA Exemption group ID
-        $noMfaGroupId = $script:TenantState.CreatedGroups["NoMFA Exemption"]
-        if (-not $noMfaGroupId) {
-            Write-LogMessage -Message "NoMFA Exemption group not found. Some policies may not be correctly configured." -Type Warning
+        # Query for NoMFA Exemption group directly using Graph API
+        Write-LogMessage -Message "Querying for NoMFA Exemption group..." -Type Info
+        $noMfaGroupId = $null
+        try {
+            $noMfaGroup = Get-MgGroup -Filter "displayName eq 'NoMFA Exemption'" -ErrorAction Stop
+            if ($noMfaGroup) {
+                $noMfaGroupId = $noMfaGroup.Id
+                Write-LogMessage -Message "Found NoMFA Exemption group: $($noMfaGroup.Id)" -Type Success
+            }
+            else {
+                Write-LogMessage -Message "NoMFA Exemption group not found. Some policies may not be correctly configured." -Type Warning
+            }
+        }
+        catch {
+            Write-LogMessage -Message "Error querying for NoMFA Exemption group: $($_.Exception.Message)" -Type Warning
         }
         
-        # Function to check if policy exists using direct API
-        function Test-PolicyExists {
-            param ([string]$PolicyName)
-            
-            try {
-                $response = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies" -ErrorAction Stop
-                
-                if ($response.PSObject.Properties.Name -contains "value") {
-                    $policies = $response.value
-                } else {
-                    $policies = @($response)
-                }
-                
-                foreach ($p in $policies) {
-                    if ($p.displayName -eq $PolicyName) {
-                        return $true
-                    }
-                }
-                return $false
-            }
-            catch {
-                Write-LogMessage -Message "Error checking policies - $($_.Exception.Message)" -Type Error
-                return $false
-            }
+        # Function to check if policy exists using Graph cmdlets
+function Test-PolicyExists {
+    param ([string]$PolicyName)
+    
+    try {
+        Write-LogMessage -Message "Checking if policy '$PolicyName' exists..." -Type Info -LogOnly
+        $existingPolicy = Get-MgIdentityConditionalAccessPolicy -Filter "displayName eq '$PolicyName'" -ErrorAction Stop
+        
+        if ($existingPolicy) {
+            Write-LogMessage -Message "Policy '$PolicyName' already exists with ID: $($existingPolicy.Id)" -Type Info -LogOnly
+            return $true
         }
+        else {
+            Write-LogMessage -Message "Policy '$PolicyName' does not exist, will create" -Type Info -LogOnly
+            return $false
+        }
+    }
+    catch {
+        Write-LogMessage -Message "Error checking if policy exists: $($_.Exception.Message)" -Type Warning
+        return $false
+    }
+}
 
         # Create C001 - Block Legacy Authentication
         $policyName = "C001 - Block Legacy Authentication All Apps"
