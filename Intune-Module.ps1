@@ -141,10 +141,11 @@ function New-TenantIntune {
         }
         
         # ===================================================================
-        # 1. DIRECT EXECUTION: WindowsAutoPilot Group Creation
+        # 1. DIRECT EXECUTION: Create All Device Platform Groups
         # ===================================================================
-        Write-LogMessage -Message "Creating WindowsAutoPilot dynamic group..." -Type Info
         
+        # WindowsAutoPilot Group
+        Write-LogMessage -Message "Creating WindowsAutoPilot dynamic group..." -Type Info
         $autopilotGroup = $null
         try {
             $existingGroup = Get-MgGroup -Filter "displayName eq 'WindowsAutoPilot'" -ErrorAction SilentlyContinue
@@ -152,7 +153,6 @@ function New-TenantIntune {
             if ($existingGroup) {
                 Write-LogMessage -Message "WindowsAutoPilot group already exists" -Type Warning
                 $autopilotGroup = $existingGroup
-                # Store in TenantState for policy assignments
                 $script:TenantState.CreatedGroups["WindowsAutoPilot"] = $existingGroup.Id
             }
             else {
@@ -169,14 +169,111 @@ function New-TenantIntune {
                 
                 $autopilotGroup = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/v1.0/groups" -Body $body
                 Write-LogMessage -Message "Created WindowsAutoPilot dynamic group" -Type Success
-                
-                # Store in TenantState for policy assignments
                 $script:TenantState.CreatedGroups["WindowsAutoPilot"] = $autopilotGroup.id
             }
         }
         catch {
             Write-LogMessage -Message "Failed to create WindowsAutoPilot group - $($_.Exception.Message)" -Type Error
             $autopilotGroup = $null
+        }
+        
+        # MacOS Devices Group
+        Write-LogMessage -Message "Creating MacOS Devices dynamic group..." -Type Info
+        $macosGroup = $null
+        try {
+            $existingGroup = Get-MgGroup -Filter "displayName eq 'MacOS Devices'" -ErrorAction SilentlyContinue
+            
+            if ($existingGroup) {
+                Write-LogMessage -Message "MacOS Devices group already exists" -Type Warning
+                $macosGroup = $existingGroup
+                $script:TenantState.CreatedGroups["MacOSDevices"] = $existingGroup.Id
+            }
+            else {
+                $body = @{
+                    displayName = "MacOS Devices"
+                    description = "Dynamic group for macOS devices"
+                    groupTypes = @("DynamicMembership")
+                    mailEnabled = $false
+                    mailNickname = "MacOSDevices"
+                    membershipRule = '(device.deviceOSType -eq "MacMDM")'
+                    membershipRuleProcessingState = "On"
+                    securityEnabled = $true
+                }
+                
+                $macosGroup = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/v1.0/groups" -Body $body
+                Write-LogMessage -Message "Created MacOS Devices dynamic group" -Type Success
+                $script:TenantState.CreatedGroups["MacOSDevices"] = $macosGroup.id
+            }
+        }
+        catch {
+            Write-LogMessage -Message "Failed to create MacOS Devices group - $($_.Exception.Message)" -Type Error
+            $macosGroup = $null
+        }
+        
+        # Android Devices Group  
+        Write-LogMessage -Message "Creating Android Devices dynamic group..." -Type Info
+        $androidGroup = $null
+        try {
+            $existingGroup = Get-MgGroup -Filter "displayName eq 'Android Devices'" -ErrorAction SilentlyContinue
+            
+            if ($existingGroup) {
+                Write-LogMessage -Message "Android Devices group already exists" -Type Warning
+                $androidGroup = $existingGroup
+                $script:TenantState.CreatedGroups["AndroidDevices"] = $existingGroup.Id
+            }
+            else {
+                $body = @{
+                    displayName = "Android Devices"
+                    description = "Dynamic group for Android devices"
+                    groupTypes = @("DynamicMembership")
+                    mailEnabled = $false
+                    mailNickname = "AndroidDevices"
+                    membershipRule = '(device.deviceOSType -eq "Android")'
+                    membershipRuleProcessingState = "On"
+                    securityEnabled = $true
+                }
+                
+                $androidGroup = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/v1.0/groups" -Body $body
+                Write-LogMessage -Message "Created Android Devices dynamic group" -Type Success
+                $script:TenantState.CreatedGroups["AndroidDevices"] = $androidGroup.id
+            }
+        }
+        catch {
+            Write-LogMessage -Message "Failed to create Android Devices group - $($_.Exception.Message)" -Type Error
+            $androidGroup = $null
+        }
+        
+        # iOS Devices Group
+        Write-LogMessage -Message "Creating iOS Devices dynamic group..." -Type Info
+        $iosGroup = $null
+        try {
+            $existingGroup = Get-MgGroup -Filter "displayName eq 'iOS Devices'" -ErrorAction SilentlyContinue
+            
+            if ($existingGroup) {
+                Write-LogMessage -Message "iOS Devices group already exists" -Type Warning
+                $iosGroup = $existingGroup
+                $script:TenantState.CreatedGroups["iOSDevices"] = $existingGroup.Id
+            }
+            else {
+                $body = @{
+                    displayName = "iOS Devices"
+                    description = "Dynamic group for iOS devices"
+                    groupTypes = @("DynamicMembership")
+                    mailEnabled = $false
+                    mailNickname = "iOSDevices"
+                    membershipRule = '(device.deviceOSType -eq "iPad") or (device.deviceOSType -eq "iPhone")'
+                    membershipRuleProcessingState = "On"
+                    securityEnabled = $true
+                }
+                
+                $iosGroup = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/v1.0/groups" -Body $body
+                Write-LogMessage -Message "Created iOS Devices dynamic group" -Type Success
+                $script:TenantState.CreatedGroups["iOSDevices"] = $iosGroup.id
+            }
+        }
+        catch {
+            Write-LogMessage -Message "Failed to create iOS Devices group - $($_.Exception.Message)" -Type Error
+            $iosGroup = $null
         }
         
         # ===================================================================
@@ -2279,7 +2376,7 @@ function New-TenantIntune {
         $compliancePolicies = @()
         
         # ===================================================================
-        # COMPLIANCE POLICY 1: WINDOWS 10/11 COMPLIANCE POLICY
+        # COMPLIANCE POLICY 1: WINDOWS 10/11 COMPLIANCE POLICY (SIMPLIFIED)
         # ===================================================================
         Write-LogMessage -Message "Creating Windows 10/11 compliance policy..." -Type Info
         
@@ -2290,42 +2387,15 @@ function New-TenantIntune {
         }
         else {
             try {
+                # Simplified Windows compliance policy with only essential properties
                 $body = @{
                     "@odata.type" = "#microsoft.graph.windows10CompliancePolicy"
                     displayName = $windowsPolicyName
                     description = "Standard Windows device compliance requirements"
-                    passwordRequired = $false
-                    passwordBlockSimple = $false
-                    passwordRequiredToUnlockFromIdle = $false
-                    passwordMinutesOfInactivityBeforeLock = $null
-                    passwordExpirationDays = $null
-                    passwordMinimumLength = $null
-                    passwordMinimumCharacterSetCount = $null
-                    passwordRequiredType = "deviceDefault"
-                    passwordPreviousPasswordBlockCount = $null
-                    requireHealthyDeviceReport = $false
-                    osMinimumVersion = $null
-                    osMaximumVersion = $null
-                    mobileOsMinimumVersion = $null
-                    mobileOsMaximumVersion = $null
-                    earlyLaunchAntiMalwareDriverEnabled = $false
                     bitLockerEnabled = $true
-                    secureBootEnabled = $false
-                    codeIntegrityEnabled = $false
-                    storageRequireEncryption = $false
-                    activeFirewallRequired = $false
-                    defenderEnabled = $false
-                    defenderVersion = $null
-                    signatureOutOfDate = $false
-                    rtpEnabled = $false
                     antivirusRequired = $true
-                    antiSpywareRequired = $false
                     deviceThreatProtectionEnabled = $false
                     deviceThreatProtectionRequiredSecurityLevel = "unavailable"
-                    configurationManagerComplianceRequired = $false
-                    tpmRequired = $false
-                    deviceCompliancePolicyScript = $null
-                    validOperatingSystemBuildRanges = @()
                 }
                 
                 $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies" -Body $body
@@ -2334,11 +2404,19 @@ function New-TenantIntune {
             }
             catch {
                 Write-LogMessage -Message "Failed to create Windows compliance policy - $($_.Exception.Message)" -Type Error
+                Write-LogMessage -Message "Response details: $($_.Exception.Response)" -Type Error
+                try {
+                    $errorResponse = $_.Exception.Response.Content.ReadAsStringAsync().Result
+                    Write-LogMessage -Message "Error response body: $errorResponse" -Type Error
+                }
+                catch {
+                    Write-LogMessage -Message "Could not read error response details" -Type Warning
+                }
             }
         }
         
         # ===================================================================
-        # COMPLIANCE POLICY 2: ANDROID COMPLIANCE POLICY
+        # COMPLIANCE POLICY 2: ANDROID COMPLIANCE POLICY (SIMPLIFIED)
         # ===================================================================
         Write-LogMessage -Message "Creating Android compliance policy..." -Type Info
         
@@ -2349,6 +2427,7 @@ function New-TenantIntune {
         }
         else {
             try {
+                # Simplified Android compliance policy
                 $body = @{
                     "@odata.type" = "#microsoft.graph.androidCompliancePolicy"
                     displayName = $androidPolicyName
@@ -2356,32 +2435,14 @@ function New-TenantIntune {
                     passwordRequired = $true
                     passwordMinimumLength = 6
                     passwordRequiredType = "atLeastNumeric"
-                    passwordMinutesOfInactivityBeforeLock = 10
-                    passwordExpirationDays = $null
-                    passwordPreviousPasswordBlockCount = $null
-                    passwordSignInFailureCountBeforeFactoryReset = $null
-                    securityPreventInstallAppsFromUnknownSources = $true
-                    securityDisableUsbDebugging = $true
-                    securityRequireVerifyApps = $true
-                    deviceThreatProtectionEnabled = $true
-                    deviceThreatProtectionRequiredSecurityLevel = "low"
-                    advancedThreatProtectionRequiredSecurityLevel = "unavailable"
                     securityBlockJailbrokenDevices = $true
-                    osMinimumVersion = $null
-                    osMaximumVersion = $null
-                    minAndroidSecurityPatchLevel = $null
                     storageRequireEncryption = $true
-                    securityRequireSafetyNetAttestationBasicIntegrity = $false
-                    securityRequireSafetyNetAttestationCertifiedDevice = $false
-                    securityRequireGooglePlayServices = $false
-                    securityRequireUpToDateSecurityProviders = $false
-                    securityRequireCompanyPortalAppIntegrity = $false
-                    conditionStatementId = $null
-                    restrictedApps = @()
+                    deviceThreatProtectionEnabled = $false
+                    deviceThreatProtectionRequiredSecurityLevel = "unavailable"
                 }
                 
                 $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies" -Body $body
-                Write-LogMessage -Message "Created Android compliance policy with password and Defender requirements" -Type Success
+                Write-LogMessage -Message "Created Android compliance policy with password and encryption requirements" -Type Success
                 $compliancePolicies += $result
             }
             catch {
@@ -2390,7 +2451,41 @@ function New-TenantIntune {
         }
         
         # ===================================================================
-        # COMPLIANCE POLICY 3: MACOS COMPLIANCE POLICY
+        # COMPLIANCE POLICY 3: IOS COMPLIANCE POLICY (NEW)
+        # ===================================================================
+        Write-LogMessage -Message "Creating iOS compliance policy..." -Type Info
+        
+        $iosPolicyName = "iOS Compliance Policy"
+        if (Test-CompliancePolicyExists -PolicyName $iosPolicyName) {
+            Write-LogMessage -Message "Policy '$iosPolicyName' already exists, skipping creation" -Type Warning
+            $compliancePolicies += @{ displayName = $iosPolicyName; id = "existing" }
+        }
+        else {
+            try {
+                # Simplified iOS compliance policy
+                $body = @{
+                    "@odata.type" = "#microsoft.graph.iosCompliancePolicy"
+                    displayName = $iosPolicyName
+                    description = "iOS compliance policy"
+                    passcodeRequired = $true
+                    passcodeMinimumLength = 6
+                    passcodeRequiredType = "numeric"
+                    deviceThreatProtectionEnabled = $false
+                    deviceThreatProtectionRequiredSecurityLevel = "unavailable"
+                    securityBlockJailbrokenDevices = $true
+                }
+                
+                $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies" -Body $body
+                Write-LogMessage -Message "Created iOS compliance policy with passcode and jailbreak protection" -Type Success
+                $compliancePolicies += $result
+            }
+            catch {
+                Write-LogMessage -Message "Failed to create iOS compliance policy - $($_.Exception.Message)" -Type Error
+            }
+        }
+        
+        # ===================================================================
+        # COMPLIANCE POLICY 4: MACOS COMPLIANCE POLICY (SIMPLIFIED)
         # ===================================================================
         Write-LogMessage -Message "Creating macOS compliance policy..." -Type Info
         
@@ -2401,29 +2496,16 @@ function New-TenantIntune {
         }
         else {
             try {
+                # Simplified macOS compliance policy
                 $body = @{
                     "@odata.type" = "#microsoft.graph.macOSCompliancePolicy"
                     displayName = $macosPolicyName
-                    description = "MacOS Compliance"
+                    description = "MacOS compliance policy"
                     passwordRequired = $true
-                    passwordBlockSimple = $false
-                    passwordExpirationDays = $null
-                    passwordMinimumLength = $null
-                    passwordMinutesOfInactivityBeforeLock = $null
-                    passwordPreviousPasswordBlockCount = $null
-                    passwordMinimumCharacterSetCount = $null
-                    passwordRequiredType = "deviceDefault"
-                    osMinimumVersion = $null
-                    osMaximumVersion = $null
                     systemIntegrityProtectionEnabled = $true
+                    firewallEnabled = $true
                     deviceThreatProtectionEnabled = $false
                     deviceThreatProtectionRequiredSecurityLevel = "unavailable"
-                    storageRequireEncryption = $false
-                    gatekeeperAllowedAppSource = "macAppStore"
-                    firewallEnabled = $true
-                    firewallBlockAllIncoming = $false
-                    firewallEnableStealthMode = $false
-                    advancedThreatProtectionRequiredSecurityLevel = "unavailable"
                 }
                 
                 $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies" -Body $body
@@ -2484,27 +2566,105 @@ function New-TenantIntune {
             }
         }
 
-        Write-LogMessage -Message "Assigning compliance policies to WindowsAutoPilot group..." -Type Info
-        foreach ($policy in $compliancePolicies) {
-            if ($policy -and $policy.id -ne "existing") {
-                try {
-                    $body = @{
-                        assignments = @(
-                            @{
-                                target = @{
-                                    "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
-                                    groupId = $autoPilotGroupId
-                                }
+        Write-LogMessage -Message "Assigning compliance policies to platform-specific groups..." -Type Info
+        
+        # Assign Windows compliance policy to WindowsAutoPilot group
+        $windowsCompliancePolicy = $compliancePolicies | Where-Object { $_.displayName -eq "Windows 10/11 compliance policy" -and $_.id -ne "existing" }
+        if ($windowsCompliancePolicy -and $script:TenantState.CreatedGroups.ContainsKey("WindowsAutoPilot")) {
+            $autoPilotGroupId = $script:TenantState.CreatedGroups["WindowsAutoPilot"]
+            try {
+                $body = @{
+                    deviceCompliancePolicyAssignments = @(
+                        @{
+                            target = @{
+                                "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
+                                groupId = $autoPilotGroupId
                             }
-                        )
-                    }
-                    
-                    Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies/$($policy.id)/assignments" -Body $body
-                    Write-LogMessage -Message "Assigned compliance policy '$($policy.displayName)' to WindowsAutoPilot group" -Type Success
+                        }
+                    )
                 }
-                catch {
-                    Write-LogMessage -Message "Failed to assign compliance policy '$($policy.displayName)': $($_.Exception.Message)" -Type Warning
+                
+                $assignUri = "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies/$($windowsCompliancePolicy.id)/assign"
+                Invoke-MgGraphRequest -Method POST -Uri $assignUri -Body $body
+                Write-LogMessage -Message "Assigned Windows compliance policy to WindowsAutoPilot group" -Type Success
+            }
+            catch {
+                Write-LogMessage -Message "Failed to assign Windows compliance policy: $($_.Exception.Message)" -Type Warning
+            }
+        }
+        
+        # Assign Android compliance policy to Android Devices group
+        $androidCompliancePolicy = $compliancePolicies | Where-Object { $_.displayName -eq "Android Compliance Policy" -and $_.id -ne "existing" }
+        if ($androidCompliancePolicy -and $script:TenantState.CreatedGroups.ContainsKey("AndroidDevices")) {
+            $androidGroupId = $script:TenantState.CreatedGroups["AndroidDevices"]
+            try {
+                $body = @{
+                    deviceCompliancePolicyAssignments = @(
+                        @{
+                            target = @{
+                                "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
+                                groupId = $androidGroupId
+                            }
+                        }
+                    )
                 }
+                
+                $assignUri = "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies/$($androidCompliancePolicy.id)/assign"
+                Invoke-MgGraphRequest -Method POST -Uri $assignUri -Body $body
+                Write-LogMessage -Message "Assigned Android compliance policy to Android Devices group" -Type Success
+            }
+            catch {
+                Write-LogMessage -Message "Failed to assign Android compliance policy: $($_.Exception.Message)" -Type Warning
+            }
+        }
+        
+        # Assign macOS compliance policy to MacOS Devices group  
+        $macosCompliancePolicy = $compliancePolicies | Where-Object { $_.displayName -eq "MacOS Compliance" -and $_.id -ne "existing" }
+        if ($macosCompliancePolicy -and $script:TenantState.CreatedGroups.ContainsKey("MacOSDevices")) {
+            $macosGroupId = $script:TenantState.CreatedGroups["MacOSDevices"]
+            try {
+                $body = @{
+                    deviceCompliancePolicyAssignments = @(
+                        @{
+                            target = @{
+                                "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
+                                groupId = $macosGroupId
+                            }
+                        }
+                    )
+                }
+                
+                $assignUri = "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies/$($macosCompliancePolicy.id)/assign"
+                Invoke-MgGraphRequest -Method POST -Uri $assignUri -Body $body
+                Write-LogMessage -Message "Assigned macOS compliance policy to MacOS Devices group" -Type Success
+            }
+            catch {
+                Write-LogMessage -Message "Failed to assign macOS compliance policy: $($_.Exception.Message)" -Type Warning
+            }
+        }
+        
+        # Assign iOS compliance policy to iOS Devices group
+        $iosCompliancePolicy = $compliancePolicies | Where-Object { $_.displayName -eq "iOS Compliance Policy" -and $_.id -ne "existing" }
+        if ($iosCompliancePolicy -and $script:TenantState.CreatedGroups.ContainsKey("iOSDevices")) {
+            $iosGroupId = $script:TenantState.CreatedGroups["iOSDevices"]
+            try {
+                $body = @{
+                    deviceCompliancePolicyAssignments = @(
+                        @{
+                            target = @{
+                                "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
+                                groupId = $iosGroupId
+                            }
+                        }
+                    )
+                }
+                
+                $assignUri = "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies/$($iosCompliancePolicy.id)/assign"
+                Invoke-MgGraphRequest -Method POST -Uri $assignUri -Body $body
+                Write-LogMessage -Message "Assigned iOS compliance policy to iOS Devices group" -Type Success
+            }
+            catch {
+                Write-LogMessage -Message "Failed to assign iOS compliance policy: $($_.Exception.Message)" -Type Warning
             }
         }
 
@@ -2546,30 +2706,68 @@ function New-TenantIntune {
                 }
             }
             
-            # Also handle existing compliance policies
+            # Also handle existing compliance policies with platform-specific assignments
             $existingCompliancePolicyNames = ($compliancePolicies | Where-Object { $_ -and $_.id -eq "existing" }).displayName
             if ($existingCompliancePolicyNames.Count -gt 0) {
+                Write-LogMessage -Message "Updating assignments for existing compliance policies..." -Type Info
                 $allCompliancePoliciesResponse = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies"
                 $existingCompliancePolicies = $allCompliancePoliciesResponse.value | Where-Object { $_.displayName -in $existingCompliancePolicyNames }
                 
                 foreach ($policy in $existingCompliancePolicies) {
-                    try {
-                        $body = @{
-                            assignments = @(
-                                @{
-                                    target = @{
-                                        "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
-                                        groupId = $autoPilotGroupId
-                                    }
-                                }
-                            )
+                    # Determine which group to assign based on policy name
+                    $targetGroupId = $null
+                    $targetGroupName = ""
+                    
+                    switch ($policy.displayName) {
+                        "Windows 10/11 compliance policy" {
+                            if ($script:TenantState.CreatedGroups.ContainsKey("WindowsAutoPilot")) {
+                                $targetGroupId = $script:TenantState.CreatedGroups["WindowsAutoPilot"]
+                                $targetGroupName = "WindowsAutoPilot"
+                            }
                         }
-                        
-                        Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies/$($policy.id)/assignments" -Body $body
-                        Write-LogMessage -Message "Assigned existing compliance policy '$($policy.displayName)' to WindowsAutoPilot group" -Type Success
+                        "Android Compliance Policy" {
+                            if ($script:TenantState.CreatedGroups.ContainsKey("AndroidDevices")) {
+                                $targetGroupId = $script:TenantState.CreatedGroups["AndroidDevices"]
+                                $targetGroupName = "Android Devices"
+                            }
+                        }
+                        "MacOS Compliance" {
+                            if ($script:TenantState.CreatedGroups.ContainsKey("MacOSDevices")) {
+                                $targetGroupId = $script:TenantState.CreatedGroups["MacOSDevices"]
+                                $targetGroupName = "MacOS Devices"
+                            }
+                        }
+                        "iOS Compliance Policy" {
+                            if ($script:TenantState.CreatedGroups.ContainsKey("iOSDevices")) {
+                                $targetGroupId = $script:TenantState.CreatedGroups["iOSDevices"]
+                                $targetGroupName = "iOS Devices"
+                            }
+                        }
                     }
-                    catch {
-                        Write-LogMessage -Message "Failed to assign existing compliance policy '$($policy.displayName)': $($_.Exception.Message)" -Type Warning
+                    
+                    if ($targetGroupId) {
+                        try {
+                            $body = @{
+                                deviceCompliancePolicyAssignments = @(
+                                    @{
+                                        target = @{
+                                            "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
+                                            groupId = $targetGroupId
+                                        }
+                                    }
+                                )
+                            }
+                            
+                            $assignUri = "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies/$($policy.id)/assign"
+                            Invoke-MgGraphRequest -Method POST -Uri $assignUri -Body $body
+                            Write-LogMessage -Message "Assigned existing compliance policy '$($policy.displayName)' to $targetGroupName group" -Type Success
+                        }
+                        catch {
+                            Write-LogMessage -Message "Failed to assign existing compliance policy '$($policy.displayName)': $($_.Exception.Message)" -Type Warning
+                        }
+                    }
+                    else {
+                        Write-LogMessage -Message "No target group found for existing compliance policy '$($policy.displayName)'" -Type Warning
                     }
                 }
             }
