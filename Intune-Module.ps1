@@ -140,7 +140,7 @@ function New-TenantIntune {
         $policies += New-OutlookPolicy
         $policies += New-DisableUACPolicy
         
-Write-LogMessage -Message "Starting compliance policy creation..." -Type Info
+        Write-LogMessage -Message "Starting compliance policy creation..." -Type Info
         $compliancePolicies = New-CompliancePolicies
         Write-LogMessage -Message "Compliance policy creation completed" -Type Success
 
@@ -149,105 +149,110 @@ Write-LogMessage -Message "Starting compliance policy creation..." -Type Info
         $existingPolicyNames = ($policies | Where-Object { $_ -and $_.id -eq "existing" }).name
         
         # Get WindowsAutoPilot group ID once
-if (-not $script:TenantState.CreatedGroups.ContainsKey("WindowsAutoPilot")) {
-    Write-LogMessage -Message "WindowsAutoPilot group not found, cannot assign policies" -Type Error
-    return $false
-}
+        if (-not $script:TenantState.CreatedGroups.ContainsKey("WindowsAutoPilot")) {
+            Write-LogMessage -Message "WindowsAutoPilot group not found, cannot assign policies" -Type Error
+            return $false
+        }
 
-$autoPilotGroupId = $script:TenantState.CreatedGroups["WindowsAutoPilot"]
-Write-LogMessage -Message "Assigning policies to WindowsAutoPilot group..." -Type Info
+        $autoPilotGroupId = $script:TenantState.CreatedGroups["WindowsAutoPilot"]
+        Write-LogMessage -Message "Assigning policies to WindowsAutoPilot group..." -Type Info
 
-# Assign new policies to WindowsAutoPilot group
-foreach ($policy in $newPolicies) {
-    try {
-        $body = @{
-            assignments = @(
-                @{
-                    target = @{
-                        "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
-                        groupId = $autoPilotGroupId
-                    }
-                }
-            )
-        }
-        
-        Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$($policy.id)/assignments" -Body $body
-        Write-LogMessage -Message "Assigned '$($policy.name)' to WindowsAutoPilot group" -Type Success
-    }
-
-    Write-LogMessage -Message "Assigning compliance policies to WindowsAutoPilot group..." -Type Info
-foreach ($policy in $compliancePolicies) {
-    if ($policy -and $policy.id -ne "existing") {
-        try {
-            $body = @{
-                assignments = @(
-                    @{
-                        target = @{
-                            "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
-                            groupId = $autoPilotGroupId
-                        }
-                    }
-                )
-            }
-            
-            Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies/$($policy.id)/assignments" -Body $body
-            Write-LogMessage -Message "Assigned compliance policy '$($policy.displayName)' to WindowsAutoPilot group" -Type Success
-        }
-    catch {
-        # Try the assign action endpoint as fallback
-        try {
-            $assignUri = "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$($policy.id)/assign"
-            Invoke-MgGraphRequest -Method POST -Uri $assignUri -Body $body
-            Write-LogMessage -Message "Assigned '$($policy.name)' to WindowsAutoPilot group (using assign action)" -Type Success
-        }
-        catch {
-            Write-LogMessage -Message "Failed to assign '$($policy.name)': $($_.Exception.Message)" -Type Warning
-        }
-    }
-}
-
-# Handle existing policies if update mode is enabled
-if ($existingPolicyNames.Count -gt 0 -and $UpdateExistingPolicies) {
-    Write-LogMessage -Message "Updating assignments for $($existingPolicyNames.Count) existing policies..." -Type Info
-    Write-LogMessage -Message "Existing policies: $($existingPolicyNames -join ', ')" -Type Info
-    
-    # Get all existing policies
-    $allPoliciesResponse = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies"
-    $existingPolicies = $allPoliciesResponse.value | Where-Object { $_.name -in $existingPolicyNames }
-    
-    foreach ($policy in $existingPolicies) {
-        try {
-            $body = @{
-                assignments = @(
-                    @{
-                        target = @{
-                            "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
-                            groupId = $autoPilotGroupId
-                        }
-                    }
-                )
-            }
-            
-            Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$($policy.id)/assignments" -Body $body
-            Write-LogMessage -Message "Assigned existing policy '$($policy.name)' to WindowsAutoPilot group" -Type Success
-        }
-        catch {
-            # Try the assign action endpoint as fallback
+        # Assign new policies to WindowsAutoPilot group
+        foreach ($policy in $newPolicies) {
             try {
-                $assignUri = "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$($policy.id)/assign"
-                Invoke-MgGraphRequest -Method POST -Uri $assignUri -Body $body
-                Write-LogMessage -Message "Assigned existing policy '$($policy.name)' to WindowsAutoPilot group (using assign action)" -Type Success
+                $body = @{
+                    assignments = @(
+                        @{
+                            target = @{
+                                "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
+                                groupId = $autoPilotGroupId
+                            }
+                        }
+                    )
+                }
+                
+                Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$($policy.id)/assignments" -Body $body
+                Write-LogMessage -Message "Assigned '$($policy.name)' to WindowsAutoPilot group" -Type Success
             }
             catch {
-                Write-LogMessage -Message "Failed to assign existing policy '$($policy.name)': $($_.Exception.Message)" -Type Warning
+                # Try the assign action endpoint as fallback
+                try {
+                    $assignUri = "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$($policy.id)/assign"
+                    Invoke-MgGraphRequest -Method POST -Uri $assignUri -Body $body
+                    Write-LogMessage -Message "Assigned '$($policy.name)' to WindowsAutoPilot group (using assign action)" -Type Success
+                }
+                catch {
+                    Write-LogMessage -Message "Failed to assign '$($policy.name)': $($_.Exception.Message)" -Type Warning
+                }
             }
         }
-    }
-}
-elseif ($existingPolicyNames.Count -gt 0 -and -not $UpdateExistingPolicies) {
-    Write-LogMessage -Message "Found $($existingPolicyNames.Count) existing policies, but update mode is disabled" -Type Warning
-    Write-LogMessage -Message "Existing policies: $($existingPolicyNames -join ', ')" -Type Info
-}
+
+        Write-LogMessage -Message "Assigning compliance policies to WindowsAutoPilot group..." -Type Info
+        foreach ($policy in $compliancePolicies) {
+            if ($policy -and $policy.id -ne "existing") {
+                try {
+                    $body = @{
+                        assignments = @(
+                            @{
+                                target = @{
+                                    "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
+                                    groupId = $autoPilotGroupId
+                                }
+                            }
+                        )
+                    }
+                    
+                    Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies/$($policy.id)/assignments" -Body $body
+                    Write-LogMessage -Message "Assigned compliance policy '$($policy.displayName)' to WindowsAutoPilot group" -Type Success
+                }
+                catch {
+                    Write-LogMessage -Message "Failed to assign compliance policy '$($policy.displayName)': $($_.Exception.Message)" -Type Warning
+                }
+            }
+        }
+
+        # Handle existing policies if update mode is enabled
+        if ($existingPolicyNames.Count -gt 0 -and $UpdateExistingPolicies) {
+            Write-LogMessage -Message "Updating assignments for $($existingPolicyNames.Count) existing policies..." -Type Info
+            Write-LogMessage -Message "Existing policies: $($existingPolicyNames -join ', ')" -Type Info
+            
+            # Get all existing policies
+            $allPoliciesResponse = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies"
+            $existingPolicies = $allPoliciesResponse.value | Where-Object { $_.name -in $existingPolicyNames }
+            
+            foreach ($policy in $existingPolicies) {
+                try {
+                    $body = @{
+                        assignments = @(
+                            @{
+                                target = @{
+                                    "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
+                                    groupId = $autoPilotGroupId
+                                }
+                            }
+                        )
+                    }
+                    
+                    Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$($policy.id)/assignments" -Body $body
+                    Write-LogMessage -Message "Assigned existing policy '$($policy.name)' to WindowsAutoPilot group" -Type Success
+                }
+                catch {
+                    # Try the assign action endpoint as fallback
+                    try {
+                        $assignUri = "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$($policy.id)/assign"
+                        Invoke-MgGraphRequest -Method POST -Uri $assignUri -Body $body
+                        Write-LogMessage -Message "Assigned existing policy '$($policy.name)' to WindowsAutoPilot group (using assign action)" -Type Success
+                    }
+                    catch {
+                        Write-LogMessage -Message "Failed to assign existing policy '$($policy.name)': $($_.Exception.Message)" -Type Warning
+                    }
+                }
+            }
+        }
+        elseif ($existingPolicyNames.Count -gt 0 -and -not $UpdateExistingPolicies) {
+            Write-LogMessage -Message "Found $($existingPolicyNames.Count) existing policies, but update mode is disabled" -Type Warning
+            Write-LogMessage -Message "Existing policies: $($existingPolicyNames -join ', ')" -Type Info
+        }
         
         Write-LogMessage -Message "Intune configuration completed successfully" -Type Success
         return $true
@@ -2385,6 +2390,228 @@ function New-DisableUACPolicy {
     catch {
         Write-LogMessage -Message "Failed to create Disable UAC policy - $($_.Exception.Message)" -Type Error
         return $null
+    }
+}
+
+function New-CompliancePolicies {
+    <#
+    .SYNOPSIS
+    Creates comprehensive device compliance policies for Windows, Android, and macOS platforms
+    
+    .DESCRIPTION
+    Creates three compliance policies with security requirements:
+    - Windows 10/11: BitLocker encryption and antivirus requirements
+    - Android: Password requirements and Microsoft Defender for Endpoint
+    - macOS: System integrity protection, firewall, and password requirements
+    
+    .EXAMPLE
+    $compliancePolicies = New-CompliancePolicies
+    #>
+    
+    Write-LogMessage -Message "Creating comprehensive compliance policies for all platforms..." -Type Info
+    
+    $createdPolicies = @()
+    
+    try {
+        # Windows 10/11 Compliance Policy
+        $windowsPolicy = New-WindowsCompliancePolicy
+        if ($windowsPolicy) {
+            $createdPolicies += $windowsPolicy
+        }
+        
+        # Android Compliance Policy
+        $androidPolicy = New-AndroidCompliancePolicy
+        if ($androidPolicy) {
+            $createdPolicies += $androidPolicy
+        }
+        
+        # macOS Compliance Policy
+        $macosPolicy = New-MacOSCompliancePolicy
+        if ($macosPolicy) {
+            $createdPolicies += $macosPolicy
+        }
+        
+        Write-LogMessage -Message "Created $($createdPolicies.Count) compliance policies successfully" -Type Success
+        return $createdPolicies
+    }
+    catch {
+        Write-LogMessage -Message "Error creating compliance policies - $($_.Exception.Message)" -Type Error
+        return $createdPolicies
+    }
+}
+
+function New-WindowsCompliancePolicy {
+    Write-LogMessage -Message "Creating Windows 10/11 compliance policy..." -Type Info
+    
+    $policyName = "Windows 10/11 compliance policy"
+    if (Test-CompliancePolicyExists -PolicyName $policyName) {
+        Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
+        return @{ displayName = $policyName; id = "existing" }
+    }
+    
+    try {
+        $body = @{
+            "@odata.type" = "#microsoft.graph.windows10CompliancePolicy"
+            displayName = $policyName
+            description = "Standard Windows device compliance requirements"
+            passwordRequired = $false
+            passwordBlockSimple = $false
+            passwordRequiredToUnlockFromIdle = $false
+            passwordMinutesOfInactivityBeforeLock = $null
+            passwordExpirationDays = $null
+            passwordMinimumLength = $null
+            passwordMinimumCharacterSetCount = $null
+            passwordRequiredType = "deviceDefault"
+            passwordPreviousPasswordBlockCount = $null
+            requireHealthyDeviceReport = $false
+            osMinimumVersion = $null
+            osMaximumVersion = $null
+            mobileOsMinimumVersion = $null
+            mobileOsMaximumVersion = $null
+            earlyLaunchAntiMalwareDriverEnabled = $false
+            bitLockerEnabled = $true
+            secureBootEnabled = $false
+            codeIntegrityEnabled = $false
+            storageRequireEncryption = $false
+            activeFirewallRequired = $false
+            defenderEnabled = $false
+            defenderVersion = $null
+            signatureOutOfDate = $false
+            rtpEnabled = $false
+            antivirusRequired = $true
+            antiSpywareRequired = $false
+            deviceThreatProtectionEnabled = $false
+            deviceThreatProtectionRequiredSecurityLevel = "unavailable"
+            configurationManagerComplianceRequired = $false
+            tpmRequired = $false
+            deviceCompliancePolicyScript = $null
+            validOperatingSystemBuildRanges = @()
+        }
+        
+        $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies" -Body $body
+        Write-LogMessage -Message "Created Windows 10/11 compliance policy with BitLocker and antivirus requirements" -Type Success
+        return $result
+    }
+    catch {
+        Write-LogMessage -Message "Failed to create Windows compliance policy - $($_.Exception.Message)" -Type Error
+        return $null
+    }
+}
+
+function New-AndroidCompliancePolicy {
+    Write-LogMessage -Message "Creating Android compliance policy..." -Type Info
+    
+    $policyName = "Android Compliance Policy"
+    if (Test-CompliancePolicyExists -PolicyName $policyName) {
+        Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
+        return @{ displayName = $policyName; id = "existing" }
+    }
+    
+    try {
+        $body = @{
+            "@odata.type" = "#microsoft.graph.androidCompliancePolicy"
+            displayName = $policyName
+            description = "Android Enterprise compliance policy"
+            passwordRequired = $true
+            passwordMinimumLength = 6
+            passwordRequiredType = "atLeastNumeric"
+            passwordMinutesOfInactivityBeforeLock = 10
+            passwordExpirationDays = $null
+            passwordPreviousPasswordBlockCount = $null
+            passwordSignInFailureCountBeforeFactoryReset = $null
+            securityPreventInstallAppsFromUnknownSources = $true
+            securityDisableUsbDebugging = $true
+            securityRequireVerifyApps = $true
+            deviceThreatProtectionEnabled = $true
+            deviceThreatProtectionRequiredSecurityLevel = "low"
+            advancedThreatProtectionRequiredSecurityLevel = "unavailable"
+            securityBlockJailbrokenDevices = $true
+            osMinimumVersion = $null
+            osMaximumVersion = $null
+            minAndroidSecurityPatchLevel = $null
+            storageRequireEncryption = $true
+            securityRequireSafetyNetAttestationBasicIntegrity = $false
+            securityRequireSafetyNetAttestationCertifiedDevice = $false
+            securityRequireGooglePlayServices = $false
+            securityRequireUpToDateSecurityProviders = $false
+            securityRequireCompanyPortalAppIntegrity = $false
+            conditionStatementId = $null
+            restrictedApps = @()
+        }
+        
+        $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies" -Body $body
+        Write-LogMessage -Message "Created Android compliance policy with password and Defender requirements" -Type Success
+        return $result
+    }
+    catch {
+        Write-LogMessage -Message "Failed to create Android compliance policy - $($_.Exception.Message)" -Type Error
+        return $null
+    }
+}
+
+function New-MacOSCompliancePolicy {
+    Write-LogMessage -Message "Creating macOS compliance policy..." -Type Info
+    
+    $policyName = "MacOS Compliance"
+    if (Test-CompliancePolicyExists -PolicyName $policyName) {
+        Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
+        return @{ displayName = $policyName; id = "existing" }
+    }
+    
+    try {
+        $body = @{
+            "@odata.type" = "#microsoft.graph.macOSCompliancePolicy"
+            displayName = $policyName
+            description = "MacOS Compliance"
+            passwordRequired = $true
+            passwordBlockSimple = $false
+            passwordExpirationDays = $null
+            passwordMinimumLength = $null
+            passwordMinutesOfInactivityBeforeLock = $null
+            passwordPreviousPasswordBlockCount = $null
+            passwordMinimumCharacterSetCount = $null
+            passwordRequiredType = "deviceDefault"
+            osMinimumVersion = $null
+            osMaximumVersion = $null
+            systemIntegrityProtectionEnabled = $true
+            deviceThreatProtectionEnabled = $false
+            deviceThreatProtectionRequiredSecurityLevel = "unavailable"
+            storageRequireEncryption = $false
+            gatekeeperAllowedAppSource = "macAppStore"
+            firewallEnabled = $true
+            firewallBlockAllIncoming = $false
+            firewallEnableStealthMode = $false
+            advancedThreatProtectionRequiredSecurityLevel = "unavailable"
+        }
+        
+        $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies" -Body $body
+        Write-LogMessage -Message "Created macOS compliance policy with system integrity and firewall requirements" -Type Success
+        return $result
+    }
+    catch {
+        Write-LogMessage -Message "Failed to create macOS compliance policy - $($_.Exception.Message)" -Type Error
+        return $null
+    }
+}
+
+function Test-CompliancePolicyExists {
+    param (
+        [string]$PolicyName
+    )
+    
+    try {
+        $existingPolicies = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies" -ErrorAction Stop
+        
+        foreach ($policy in $existingPolicies.value) {
+            if ($policy.displayName -eq $PolicyName) {
+                return $true
+            }
+        }
+        return $false
+    }
+    catch {
+        Write-LogMessage -Message "Error checking existing compliance policies: $($_.Exception.Message)" -Type Warning -LogOnly
+        return $false
     }
 }
 
