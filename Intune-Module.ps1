@@ -332,25 +332,12 @@ function Enable-WindowsLAPS {
 
 # === Complete Policy Creation Functions with Existence Checks ===
 
-function New-PowerOptionsPolicy {
-    Write-LogMessage -Message "Creating complete Power Options policy..." -Type Info
-    
-    $policyName = "Power Options"
-    if (Test-PolicyExists -PolicyName $policyName) {
-        Write-LogMessage -Message "Policy '$policyName' already exists, skipping creation" -Type Warning
-        return @{ name = $policyName; id = "existing" }
-    }
-    
     try {
         $body = @{
             name = $policyName
             description = "Comprehensive power management settings for devices"
             platforms = "windows10"
             technologies = "mdm"
-            templateReference = @{
-                templateId = ""
-                templateFamily = "none"
-            }
             settings = @(
                 # Allow Hibernate
                 @{
@@ -435,9 +422,10 @@ function New-PowerOptionsPolicy {
         Write-LogMessage -Message "Failed to create Power Options policy - $($_.Exception.Message)" -Type Error
         return $null
     }
-}
 
-function New-DefenderAntivirusPolicy {
+
+
+lfunction New-DefenderAntivirusPolicy {
     Write-LogMessage -Message "Creating comprehensive Defender Antivirus policy with 27 settings..." -Type Info
     
     $policyName = "NGP Windows default policy"
@@ -973,10 +961,7 @@ function New-BitLockerPolicy {
             description = "Comprehensive BitLocker drive encryption configuration"
             platforms = "windows10"
             technologies = "mdm"
-            templateReference = @{
-                templateId = ""
-                templateFamily = "none"
-            }
+            # REMOVED templateReference completely - not needed for this policy type
             settings = @(
                 # Require Device Encryption
                 @{
@@ -1413,10 +1398,6 @@ function New-OneDrivePolicy {
             description = "OneDrive for Business configuration with Known Folder Move"
             platforms = "windows10"
             technologies = "mdm"
-            templateReference = @{
-                templateId = ""
-                templateFamily = "none"
-            }
             settings = @(
                 # Disable pause on metered networks
                 @{
@@ -1556,6 +1537,7 @@ function New-OneDrivePolicy {
     }
 }
 
+
 function New-EdgePolicies {
     Write-LogMessage -Message "Creating Edge policy with SharePoint homepage..." -Type Info
     
@@ -1574,10 +1556,6 @@ function New-EdgePolicies {
             description = "Setting SharePoint home page as default start up page"
             platforms = "windows10"
             technologies = "mdm"
-            templateReference = @{
-                templateId = ""
-                templateFamily = "none"
-            }
             settings = @(
                 # Restore on startup
                 @{
@@ -2070,10 +2048,6 @@ function New-AdminAccountPolicy {
             description = "Enable and configure built-in administrator account for LAPS"
             platforms = "windows10"
             technologies = "mdm"
-            templateReference = @{
-                templateId = ""
-                templateFamily = "none"
-            }
             settings = @(
                 # Enable Administrator Account
                 @{
@@ -2364,10 +2338,6 @@ function New-DisableUACPolicy {
             description = "Disable UAC secure desktop prompt for QuickAssist"
             platforms = "windows10"
             technologies = "mdm"
-            templateReference = @{
-                templateId = ""
-                templateFamily = "none"
-            }
             settings = @(
                 @{
                     id = "0"
