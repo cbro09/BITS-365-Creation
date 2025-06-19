@@ -2376,7 +2376,7 @@ function New-TenantIntune {
         $compliancePolicies = @()
         
         # ===================================================================
-        # COMPLIANCE POLICY 1: WINDOWS 10/11 COMPLIANCE POLICY (SIMPLIFIED)
+        # COMPLIANCE POLICY 1: WINDOWS 10/11 COMPLIANCE POLICY (WITH REQUIRED ACTIONS)
         # ===================================================================
         Write-LogMessage -Message "Creating Windows 10/11 compliance policy..." -Type Info
         
@@ -2387,7 +2387,7 @@ function New-TenantIntune {
         }
         else {
             try {
-                # Simplified Windows compliance policy with only essential properties
+                # Windows compliance policy with required scheduledActionsForRule
                 $body = @{
                     "@odata.type" = "#microsoft.graph.windows10CompliancePolicy"
                     displayName = $windowsPolicyName
@@ -2396,6 +2396,18 @@ function New-TenantIntune {
                     antivirusRequired = $true
                     deviceThreatProtectionEnabled = $false
                     deviceThreatProtectionRequiredSecurityLevel = "unavailable"
+                    scheduledActionsForRule = @(
+                        @{
+                            ruleName = "PasswordRequired"
+                            scheduledActionConfigurations = @(
+                                @{
+                                    actionType = "block"
+                                    gracePeriodHours = 72
+                                    notificationTemplateId = ""
+                                }
+                            )
+                        }
+                    )
                 }
                 
                 $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies" -Body $body
@@ -2416,7 +2428,7 @@ function New-TenantIntune {
         }
         
         # ===================================================================
-        # COMPLIANCE POLICY 2: ANDROID COMPLIANCE POLICY (SIMPLIFIED)
+        # COMPLIANCE POLICY 2: ANDROID COMPLIANCE POLICY (WITH REQUIRED ACTIONS)
         # ===================================================================
         Write-LogMessage -Message "Creating Android compliance policy..." -Type Info
         
@@ -2427,7 +2439,7 @@ function New-TenantIntune {
         }
         else {
             try {
-                # Simplified Android compliance policy
+                # Android compliance policy with required scheduledActionsForRule
                 $body = @{
                     "@odata.type" = "#microsoft.graph.androidCompliancePolicy"
                     displayName = $androidPolicyName
@@ -2439,6 +2451,18 @@ function New-TenantIntune {
                     storageRequireEncryption = $true
                     deviceThreatProtectionEnabled = $false
                     deviceThreatProtectionRequiredSecurityLevel = "unavailable"
+                    scheduledActionsForRule = @(
+                        @{
+                            ruleName = "PasswordRequired"
+                            scheduledActionConfigurations = @(
+                                @{
+                                    actionType = "block"
+                                    gracePeriodHours = 72
+                                    notificationTemplateId = ""
+                                }
+                            )
+                        }
+                    )
                 }
                 
                 $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies" -Body $body
@@ -2451,7 +2475,7 @@ function New-TenantIntune {
         }
         
         # ===================================================================
-        # COMPLIANCE POLICY 3: IOS COMPLIANCE POLICY (NEW)
+        # COMPLIANCE POLICY 3: IOS COMPLIANCE POLICY (WITH REQUIRED ACTIONS)
         # ===================================================================
         Write-LogMessage -Message "Creating iOS compliance policy..." -Type Info
         
@@ -2462,7 +2486,7 @@ function New-TenantIntune {
         }
         else {
             try {
-                # Simplified iOS compliance policy
+                # iOS compliance policy with required scheduledActionsForRule
                 $body = @{
                     "@odata.type" = "#microsoft.graph.iosCompliancePolicy"
                     displayName = $iosPolicyName
@@ -2473,6 +2497,18 @@ function New-TenantIntune {
                     deviceThreatProtectionEnabled = $false
                     deviceThreatProtectionRequiredSecurityLevel = "unavailable"
                     securityBlockJailbrokenDevices = $true
+                    scheduledActionsForRule = @(
+                        @{
+                            ruleName = "PasswordRequired"
+                            scheduledActionConfigurations = @(
+                                @{
+                                    actionType = "block"
+                                    gracePeriodHours = 72
+                                    notificationTemplateId = ""
+                                }
+                            )
+                        }
+                    )
                 }
                 
                 $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies" -Body $body
@@ -2485,7 +2521,7 @@ function New-TenantIntune {
         }
         
         # ===================================================================
-        # COMPLIANCE POLICY 4: MACOS COMPLIANCE POLICY (SIMPLIFIED)
+        # COMPLIANCE POLICY 4: MACOS COMPLIANCE POLICY (WITH REQUIRED ACTIONS)
         # ===================================================================
         Write-LogMessage -Message "Creating macOS compliance policy..." -Type Info
         
@@ -2496,7 +2532,7 @@ function New-TenantIntune {
         }
         else {
             try {
-                # Simplified macOS compliance policy
+                # macOS compliance policy with required scheduledActionsForRule
                 $body = @{
                     "@odata.type" = "#microsoft.graph.macOSCompliancePolicy"
                     displayName = $macosPolicyName
@@ -2506,6 +2542,18 @@ function New-TenantIntune {
                     firewallEnabled = $true
                     deviceThreatProtectionEnabled = $false
                     deviceThreatProtectionRequiredSecurityLevel = "unavailable"
+                    scheduledActionsForRule = @(
+                        @{
+                            ruleName = "PasswordRequired"
+                            scheduledActionConfigurations = @(
+                                @{
+                                    actionType = "block"
+                                    gracePeriodHours = 72
+                                    notificationTemplateId = ""
+                                }
+                            )
+                        }
+                    )
                 }
                 
                 $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies" -Body $body
@@ -2589,7 +2637,26 @@ function New-TenantIntune {
                 Write-LogMessage -Message "Assigned Windows compliance policy to WindowsAutoPilot group" -Type Success
             }
             catch {
-                Write-LogMessage -Message "Failed to assign Windows compliance policy: $($_.Exception.Message)" -Type Warning
+                Write-LogMessage -Message "Primary assignment failed for Windows compliance policy: $($_.Exception.Message)" -Type Warning
+                # Try alternative method
+                try {
+                    $alternativeBody = @{
+                        assignments = @(
+                            @{
+                                target = @{
+                                    "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
+                                    groupId = $autoPilotGroupId
+                                }
+                            }
+                        )
+                    }
+                    $assignUri = "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies/$($windowsCompliancePolicy.id)/assignments"
+                    Invoke-MgGraphRequest -Method POST -Uri $assignUri -Body $alternativeBody
+                    Write-LogMessage -Message "Assigned Windows compliance policy using alternative method" -Type Success
+                }
+                catch {
+                    Write-LogMessage -Message "Failed to assign Windows compliance policy with both methods: $($_.Exception.Message)" -Type Warning
+                }
             }
         }
         
@@ -2614,7 +2681,26 @@ function New-TenantIntune {
                 Write-LogMessage -Message "Assigned Android compliance policy to Android Devices group" -Type Success
             }
             catch {
-                Write-LogMessage -Message "Failed to assign Android compliance policy: $($_.Exception.Message)" -Type Warning
+                Write-LogMessage -Message "Primary assignment failed for Android compliance policy: $($_.Exception.Message)" -Type Warning
+                # Try alternative method
+                try {
+                    $alternativeBody = @{
+                        assignments = @(
+                            @{
+                                target = @{
+                                    "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
+                                    groupId = $androidGroupId
+                                }
+                            }
+                        )
+                    }
+                    $assignUri = "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies/$($androidCompliancePolicy.id)/assignments"
+                    Invoke-MgGraphRequest -Method POST -Uri $assignUri -Body $alternativeBody
+                    Write-LogMessage -Message "Assigned Android compliance policy using alternative method" -Type Success
+                }
+                catch {
+                    Write-LogMessage -Message "Failed to assign Android compliance policy with both methods: $($_.Exception.Message)" -Type Warning
+                }
             }
         }
         
@@ -2639,7 +2725,26 @@ function New-TenantIntune {
                 Write-LogMessage -Message "Assigned macOS compliance policy to MacOS Devices group" -Type Success
             }
             catch {
-                Write-LogMessage -Message "Failed to assign macOS compliance policy: $($_.Exception.Message)" -Type Warning
+                Write-LogMessage -Message "Primary assignment failed for macOS compliance policy: $($_.Exception.Message)" -Type Warning
+                # Try alternative method
+                try {
+                    $alternativeBody = @{
+                        assignments = @(
+                            @{
+                                target = @{
+                                    "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
+                                    groupId = $macosGroupId
+                                }
+                            }
+                        )
+                    }
+                    $assignUri = "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies/$($macosCompliancePolicy.id)/assignments"
+                    Invoke-MgGraphRequest -Method POST -Uri $assignUri -Body $alternativeBody
+                    Write-LogMessage -Message "Assigned macOS compliance policy using alternative method" -Type Success
+                }
+                catch {
+                    Write-LogMessage -Message "Failed to assign macOS compliance policy with both methods: $($_.Exception.Message)" -Type Warning
+                }
             }
         }
         
@@ -2664,7 +2769,26 @@ function New-TenantIntune {
                 Write-LogMessage -Message "Assigned iOS compliance policy to iOS Devices group" -Type Success
             }
             catch {
-                Write-LogMessage -Message "Failed to assign iOS compliance policy: $($_.Exception.Message)" -Type Warning
+                Write-LogMessage -Message "Primary assignment failed for iOS compliance policy: $($_.Exception.Message)" -Type Warning
+                # Try alternative method
+                try {
+                    $alternativeBody = @{
+                        assignments = @(
+                            @{
+                                target = @{
+                                    "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
+                                    groupId = $iosGroupId
+                                }
+                            }
+                        )
+                    }
+                    $assignUri = "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies/$($iosCompliancePolicy.id)/assignments"
+                    Invoke-MgGraphRequest -Method POST -Uri $assignUri -Body $alternativeBody
+                    Write-LogMessage -Message "Assigned iOS compliance policy using alternative method" -Type Success
+                }
+                catch {
+                    Write-LogMessage -Message "Failed to assign iOS compliance policy with both methods: $($_.Exception.Message)" -Type Warning
+                }
             }
         }
 
@@ -2747,6 +2871,7 @@ function New-TenantIntune {
                     
                     if ($targetGroupId) {
                         try {
+                            # First try the assign action method
                             $body = @{
                                 deviceCompliancePolicyAssignments = @(
                                     @{
@@ -2763,7 +2888,46 @@ function New-TenantIntune {
                             Write-LogMessage -Message "Assigned existing compliance policy '$($policy.displayName)' to $targetGroupName group" -Type Success
                         }
                         catch {
-                            Write-LogMessage -Message "Failed to assign existing compliance policy '$($policy.displayName)': $($_.Exception.Message)" -Type Warning
+                            Write-LogMessage -Message "Primary assignment failed for '$($policy.displayName)': $($_.Exception.Message)" -Type Warning
+                            Write-LogMessage -Message "Trying alternative assignment method..." -Type Info
+                            
+                            # Try alternative assignment structure
+                            try {
+                                $alternativeBody = @{
+                                    assignments = @(
+                                        @{
+                                            target = @{
+                                                "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
+                                                groupId = $targetGroupId
+                                            }
+                                        }
+                                    )
+                                }
+                                
+                                $assignUri = "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies/$($policy.id)/assignments"
+                                Invoke-MgGraphRequest -Method POST -Uri $assignUri -Body $alternativeBody
+                                Write-LogMessage -Message "Assigned existing compliance policy '$($policy.displayName)' to $targetGroupName group using alternative method" -Type Success
+                            }
+                            catch {
+                                Write-LogMessage -Message "Both assignment methods failed for '$($policy.displayName)': $($_.Exception.Message)" -Type Warning
+                                
+                                # Try a simplified assignment as last resort
+                                try {
+                                    $simpleBody = @{
+                                        target = @{
+                                            "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
+                                            groupId = $targetGroupId
+                                        }
+                                    }
+                                    
+                                    $assignUri = "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies/$($policy.id)/assignments"
+                                    Invoke-MgGraphRequest -Method POST -Uri $assignUri -Body $simpleBody
+                                    Write-LogMessage -Message "Assigned existing compliance policy '$($policy.displayName)' to $targetGroupName group using simple method" -Type Success
+                                }
+                                catch {
+                                    Write-LogMessage -Message "All assignment methods failed for '$($policy.displayName)': $($_.Exception.Message)" -Type Error
+                                }
+                            }
                         }
                     }
                     else {
