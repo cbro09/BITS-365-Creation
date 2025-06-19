@@ -2428,7 +2428,7 @@ function New-TenantIntune {
         }
         
         # ===================================================================
-        # COMPLIANCE POLICY 2: ANDROID COMPLIANCE POLICY (WITH REQUIRED ACTIONS)
+        # COMPLIANCE POLICY 2: ANDROID COMPLIANCE POLICY (FIXED PROPERTIES)
         # ===================================================================
         Write-LogMessage -Message "Creating Android compliance policy..." -Type Info
         
@@ -2439,14 +2439,13 @@ function New-TenantIntune {
         }
         else {
             try {
-                # Android compliance policy with required scheduledActionsForRule
+                # Simplified Android compliance policy - remove problematic properties
                 $body = @{
                     "@odata.type" = "#microsoft.graph.androidCompliancePolicy"
                     displayName = $androidPolicyName
                     description = "Android Enterprise compliance policy"
                     passwordRequired = $true
                     passwordMinimumLength = 6
-                    passwordRequiredType = "atLeastNumeric"
                     securityBlockJailbrokenDevices = $true
                     storageRequireEncryption = $true
                     deviceThreatProtectionEnabled = $false
@@ -2471,6 +2470,39 @@ function New-TenantIntune {
             }
             catch {
                 Write-LogMessage -Message "Failed to create Android compliance policy - $($_.Exception.Message)" -Type Error
+                
+                # Try with even more basic Android policy
+                try {
+                    Write-LogMessage -Message "Trying basic Android compliance policy..." -Type Info
+                    $basicBody = @{
+                        "@odata.type" = "#microsoft.graph.androidCompliancePolicy"
+                        displayName = $androidPolicyName
+                        description = "Basic Android compliance policy"
+                        passwordRequired = $true
+                        securityBlockJailbrokenDevices = $true
+                        deviceThreatProtectionEnabled = $false
+                        deviceThreatProtectionRequiredSecurityLevel = "unavailable"
+                        scheduledActionsForRule = @(
+                            @{
+                                ruleName = "PasswordRequired"
+                                scheduledActionConfigurations = @(
+                                    @{
+                                        actionType = "block"
+                                        gracePeriodHours = 72
+                                        notificationTemplateId = ""
+                                    }
+                                )
+                            }
+                        )
+                    }
+                    
+                    $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies" -Body $basicBody
+                    Write-LogMessage -Message "Created basic Android compliance policy" -Type Success
+                    $compliancePolicies += $result
+                }
+                catch {
+                    Write-LogMessage -Message "Failed to create basic Android compliance policy - $($_.Exception.Message)" -Type Error
+                }
             }
         }
         
@@ -2616,14 +2648,14 @@ function New-TenantIntune {
 
         Write-LogMessage -Message "Assigning compliance policies to platform-specific groups..." -Type Info
         
-        # Use the SAME assignment method that works for configuration policies
+        # Use the SAME assignment method that works for configuration policies (with fallback)
         
         # Assign Windows compliance policy to WindowsAutoPilot group
         $windowsCompliancePolicy = $compliancePolicies | Where-Object { $_.displayName -eq "Windows 10/11 compliance policy" -and $_.id -ne "existing" }
         if ($windowsCompliancePolicy -and $script:TenantState.CreatedGroups.ContainsKey("WindowsAutoPilot")) {
             $autoPilotGroupId = $script:TenantState.CreatedGroups["WindowsAutoPilot"]
             try {
-                # Use EXACT SAME structure as configuration policies
+                # Try primary method first (same as configuration policies)
                 $body = @{
                     assignments = @(
                         @{
@@ -2635,12 +2667,19 @@ function New-TenantIntune {
                     )
                 }
                 
-                # Use SAME endpoint pattern as configuration policies
                 Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies/$($windowsCompliancePolicy.id)/assignments" -Body $body
                 Write-LogMessage -Message "Assigned Windows compliance policy to WindowsAutoPilot group" -Type Success
             }
             catch {
-                Write-LogMessage -Message "Failed to assign Windows compliance policy: $($_.Exception.Message)" -Type Warning
+                # Try the assign action endpoint as fallback (same as configuration policies)
+                try {
+                    $assignUri = "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies/$($windowsCompliancePolicy.id)/assign"
+                    Invoke-MgGraphRequest -Method POST -Uri $assignUri -Body $body
+                    Write-LogMessage -Message "Assigned Windows compliance policy to WindowsAutoPilot group (using assign action)" -Type Success
+                }
+                catch {
+                    Write-LogMessage -Message "Failed to assign Windows compliance policy: $($_.Exception.Message)" -Type Warning
+                }
             }
         }
         
@@ -2649,7 +2688,7 @@ function New-TenantIntune {
         if ($androidCompliancePolicy -and $script:TenantState.CreatedGroups.ContainsKey("AndroidDevices")) {
             $androidGroupId = $script:TenantState.CreatedGroups["AndroidDevices"]
             try {
-                # Use EXACT SAME structure as configuration policies
+                # Try primary method first
                 $body = @{
                     assignments = @(
                         @{
@@ -2661,12 +2700,19 @@ function New-TenantIntune {
                     )
                 }
                 
-                # Use SAME endpoint pattern as configuration policies
                 Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies/$($androidCompliancePolicy.id)/assignments" -Body $body
                 Write-LogMessage -Message "Assigned Android compliance policy to Android Devices group" -Type Success
             }
             catch {
-                Write-LogMessage -Message "Failed to assign Android compliance policy: $($_.Exception.Message)" -Type Warning
+                # Try the assign action endpoint as fallback
+                try {
+                    $assignUri = "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies/$($androidCompliancePolicy.id)/assign"
+                    Invoke-MgGraphRequest -Method POST -Uri $assignUri -Body $body
+                    Write-LogMessage -Message "Assigned Android compliance policy to Android Devices group (using assign action)" -Type Success
+                }
+                catch {
+                    Write-LogMessage -Message "Failed to assign Android compliance policy: $($_.Exception.Message)" -Type Warning
+                }
             }
         }
         
@@ -2675,7 +2721,7 @@ function New-TenantIntune {
         if ($macosCompliancePolicy -and $script:TenantState.CreatedGroups.ContainsKey("MacOSDevices")) {
             $macosGroupId = $script:TenantState.CreatedGroups["MacOSDevices"]
             try {
-                # Use EXACT SAME structure as configuration policies
+                # Try primary method first
                 $body = @{
                     assignments = @(
                         @{
@@ -2687,12 +2733,19 @@ function New-TenantIntune {
                     )
                 }
                 
-                # Use SAME endpoint pattern as configuration policies
                 Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies/$($macosCompliancePolicy.id)/assignments" -Body $body
                 Write-LogMessage -Message "Assigned macOS compliance policy to MacOS Devices group" -Type Success
             }
             catch {
-                Write-LogMessage -Message "Failed to assign macOS compliance policy: $($_.Exception.Message)" -Type Warning
+                # Try the assign action endpoint as fallback
+                try {
+                    $assignUri = "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies/$($macosCompliancePolicy.id)/assign"
+                    Invoke-MgGraphRequest -Method POST -Uri $assignUri -Body $body
+                    Write-LogMessage -Message "Assigned macOS compliance policy to MacOS Devices group (using assign action)" -Type Success
+                }
+                catch {
+                    Write-LogMessage -Message "Failed to assign macOS compliance policy: $($_.Exception.Message)" -Type Warning
+                }
             }
         }
         
@@ -2701,7 +2754,7 @@ function New-TenantIntune {
         if ($iosCompliancePolicy -and $script:TenantState.CreatedGroups.ContainsKey("iOSDevices")) {
             $iosGroupId = $script:TenantState.CreatedGroups["iOSDevices"]
             try {
-                # Use EXACT SAME structure as configuration policies
+                # Try primary method first
                 $body = @{
                     assignments = @(
                         @{
@@ -2713,12 +2766,19 @@ function New-TenantIntune {
                     )
                 }
                 
-                # Use SAME endpoint pattern as configuration policies
                 Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies/$($iosCompliancePolicy.id)/assignments" -Body $body
                 Write-LogMessage -Message "Assigned iOS compliance policy to iOS Devices group" -Type Success
             }
             catch {
-                Write-LogMessage -Message "Failed to assign iOS compliance policy: $($_.Exception.Message)" -Type Warning
+                # Try the assign action endpoint as fallback
+                try {
+                    $assignUri = "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies/$($iosCompliancePolicy.id)/assign"
+                    Invoke-MgGraphRequest -Method POST -Uri $assignUri -Body $body
+                    Write-LogMessage -Message "Assigned iOS compliance policy to iOS Devices group (using assign action)" -Type Success
+                }
+                catch {
+                    Write-LogMessage -Message "Failed to assign iOS compliance policy: $($_.Exception.Message)" -Type Warning
+                }
             }
         }
 
@@ -2760,7 +2820,7 @@ function New-TenantIntune {
                 }
             }
             
-            # Also handle existing compliance policies using the SAME method as configuration policies
+            # Also handle existing compliance policies using the SAME method as configuration policies (with fallback)
             $existingCompliancePolicyNames = ($compliancePolicies | Where-Object { $_ -and $_.id -eq "existing" }).displayName
             if ($existingCompliancePolicyNames.Count -gt 0) {
                 Write-LogMessage -Message "Updating assignments for existing compliance policies..." -Type Info
@@ -2801,7 +2861,7 @@ function New-TenantIntune {
                     
                     if ($targetGroupId) {
                         try {
-                            # Use the EXACT SAME assignment method that works for configuration policies
+                            # Try primary method first (same as configuration policies)
                             $body = @{
                                 assignments = @(
                                     @{
@@ -2813,12 +2873,19 @@ function New-TenantIntune {
                                 )
                             }
                             
-                            # Use SAME endpoint pattern as configuration policies
                             Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies/$($policy.id)/assignments" -Body $body
                             Write-LogMessage -Message "Successfully assigned existing compliance policy '$($policy.displayName)' to $targetGroupName group" -Type Success
                         }
                         catch {
-                            Write-LogMessage -Message "Failed to assign existing compliance policy '$($policy.displayName)': $($_.Exception.Message)" -Type Warning
+                            # Try the assign action endpoint as fallback (same as configuration policies)
+                            try {
+                                $assignUri = "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies/$($policy.id)/assign"
+                                Invoke-MgGraphRequest -Method POST -Uri $assignUri -Body $body
+                                Write-LogMessage -Message "Successfully assigned existing compliance policy '$($policy.displayName)' to $targetGroupName group (using assign action)" -Type Success
+                            }
+                            catch {
+                                Write-LogMessage -Message "Failed to assign existing compliance policy '$($policy.displayName)': $($_.Exception.Message)" -Type Warning
+                            }
                         }
                     }
                     else {
