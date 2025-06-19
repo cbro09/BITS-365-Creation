@@ -2830,7 +2830,7 @@ function New-TenantIntune {
                 }
             }
             
-            # Also handle existing compliance policies with platform-specific assignments
+            # Also handle existing compliance policies with improved assignment logic
             $existingCompliancePolicyNames = ($compliancePolicies | Where-Object { $_ -and $_.id -eq "existing" }).displayName
             if ($existingCompliancePolicyNames.Count -gt 0) {
                 Write-LogMessage -Message "Updating assignments for existing compliance policies..." -Type Info
@@ -2871,29 +2871,68 @@ function New-TenantIntune {
                     
                     if ($targetGroupId) {
                         try {
-                            # First try the assign action method
-                            $body = @{
-                                deviceCompliancePolicyAssignments = @(
-                                    @{
-                                        target = @{
-                                            "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
-                                            groupId = $targetGroupId
-                                        }
-                                    }
-                                )
+                            # First, check existing assignments
+                            Write-LogMessage -Message "Checking existing assignments for '$($policy.displayName)'..." -Type Info
+                            $existingAssignments = $null
+                            try {
+                                $existingAssignments = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies/$($policy.id)/assignments"
+                            }
+                            catch {
+                                Write-LogMessage -Message "Could not retrieve existing assignments for '$($policy.displayName)'" -Type Warning
                             }
                             
-                            $assignUri = "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies/$($policy.id)/assign"
-                            Invoke-MgGraphRequest -Method POST -Uri $assignUri -Body $body
-                            Write-LogMessage -Message "Assigned existing compliance policy '$($policy.displayName)' to $targetGroupName group" -Type Success
+                            # Check if our target group is already assigned
+                            $alreadyAssigned = $false
+                            if ($existingAssignments -and $existingAssignments.value) {
+                                foreach ($assignment in $existingAssignments.value) {
+                                    if ($assignment.target -and $assignment.target.groupId -eq $targetGroupId) {
+                                        $alreadyAssigned = $true
+                                        break
+                                    }
+                                }
+                            }
+                            
+                            if ($alreadyAssigned) {
+                                Write-LogMessage -Message "Policy '$($policy.displayName)' is already assigned to $targetGroupName group" -Type Success
+                                continue
+                            }
+                            
+                            # Try to assign using the assignments endpoint directly (PUT method to replace all assignments)
+                            $assignments = @()
+                            
+                            # Keep existing assignments if they exist
+                            if ($existingAssignments -and $existingAssignments.value) {
+                                foreach ($assignment in $existingAssignments.value) {
+                                    $assignments += @{
+                                        target = $assignment.target
+                                    }
+                                }
+                            }
+                            
+                            # Add our new assignment
+                            $assignments += @{
+                                target = @{
+                                    "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
+                                    groupId = $targetGroupId
+                                }
+                            }
+                            
+                            $body = @{
+                                assignments = $assignments
+                            }
+                            
+                            # Use PUT to replace all assignments
+                            $assignUri = "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies/$($policy.id)/assignments"
+                            Invoke-MgGraphRequest -Method PUT -Uri $assignUri -Body $body
+                            Write-LogMessage -Message "Successfully updated assignments for '$($policy.displayName)' to include $targetGroupName group" -Type Success
                         }
                         catch {
-                            Write-LogMessage -Message "Primary assignment failed for '$($policy.displayName)': $($_.Exception.Message)" -Type Warning
-                            Write-LogMessage -Message "Trying alternative assignment method..." -Type Info
+                            Write-LogMessage -Message "Failed to update assignments for '$($policy.displayName)': $($_.Exception.Message)" -Type Warning
                             
-                            # Try alternative assignment structure
+                            # Try a simpler approach - just assign to our group only
                             try {
-                                $alternativeBody = @{
+                                Write-LogMessage -Message "Trying simple assignment replacement for '$($policy.displayName)'..." -Type Info
+                                $simpleBody = @{
                                     assignments = @(
                                         @{
                                             target = @{
@@ -2905,15 +2944,16 @@ function New-TenantIntune {
                                 }
                                 
                                 $assignUri = "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies/$($policy.id)/assignments"
-                                Invoke-MgGraphRequest -Method POST -Uri $assignUri -Body $alternativeBody
-                                Write-LogMessage -Message "Assigned existing compliance policy '$($policy.displayName)' to $targetGroupName group using alternative method" -Type Success
+                                Invoke-MgGraphRequest -Method PUT -Uri $assignUri -Body $simpleBody
+                                Write-LogMessage -Message "Successfully assigned '$($policy.displayName)' to $targetGroupName group (simple method)" -Type Success
                             }
                             catch {
-                                Write-LogMessage -Message "Both assignment methods failed for '$($policy.displayName)': $($_.Exception.Message)" -Type Warning
+                                Write-LogMessage -Message "Simple assignment also failed for '$($policy.displayName)': $($_.Exception.Message)" -Type Error
                                 
-                                # Try a simplified assignment as last resort
+                                # Last resort: try direct assignment creation
                                 try {
-                                    $simpleBody = @{
+                                    Write-LogMessage -Message "Trying direct assignment creation for '$($policy.displayName)'..." -Type Info
+                                    $directBody = @{
                                         target = @{
                                             "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
                                             groupId = $targetGroupId
@@ -2921,11 +2961,12 @@ function New-TenantIntune {
                                     }
                                     
                                     $assignUri = "https://graph.microsoft.com/beta/deviceManagement/deviceCompliancePolicies/$($policy.id)/assignments"
-                                    Invoke-MgGraphRequest -Method POST -Uri $assignUri -Body $simpleBody
-                                    Write-LogMessage -Message "Assigned existing compliance policy '$($policy.displayName)' to $targetGroupName group using simple method" -Type Success
+                                    Invoke-MgGraphRequest -Method POST -Uri $assignUri -Body $directBody
+                                    Write-LogMessage -Message "Successfully assigned '$($policy.displayName)' to $targetGroupName group (direct method)" -Type Success
                                 }
                                 catch {
                                     Write-LogMessage -Message "All assignment methods failed for '$($policy.displayName)': $($_.Exception.Message)" -Type Error
+                                    Write-LogMessage -Message "Policy '$($policy.displayName)' assignment skipped - may need manual assignment in Intune portal" -Type Warning
                                 }
                             }
                         }
