@@ -425,7 +425,7 @@ function Enable-WindowsLAPS {
 
 
 
-lfunction New-DefenderAntivirusPolicy {
+function New-DefenderAntivirusPolicy {
     Write-LogMessage -Message "Creating comprehensive Defender Antivirus policy with 27 settings..." -Type Info
     
     $policyName = "NGP Windows default policy"
