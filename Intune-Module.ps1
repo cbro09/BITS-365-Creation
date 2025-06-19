@@ -261,7 +261,7 @@ function New-TenantIntune {
         Write-LogMessage -Message "Error in Intune configuration - $($_.Exception.Message)" -Type Error
         return $false
     }
-}
+
 
 # === Group Creation Functions ===
 
@@ -2628,4 +2628,5 @@ function Get-SharePointRootSiteUrl {
     catch {
         return "https://www.office.com"
     }
+}
 }
