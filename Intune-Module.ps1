@@ -2050,25 +2050,27 @@ function New-TenantIntune {
                     settings = @(
                         # Restore on startup
                         @{
-                            id = "0"
-                            settingInstance = @{
-                                "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                                settingDefinitionId = "device_vendor_msft_policy_config_microsoft_edgev77.3~policy~microsoft_edge~startup_restoreonstartup"
-                                choiceSettingValue = @{
-                                    value = "device_vendor_msft_policy_config_microsoft_edgev77.3~policy~microsoft_edge~startup_restoreonstartup_1"
-                                    children = @(
-                                        @{
-                                            "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
-                                            settingDefinitionId = "device_vendor_msft_policy_config_microsoft_edgev77.3~policy~microsoft_edge~startup_restoreonstartup_restoreonstartup"
-                                            choiceSettingValue = @{
-                                                value = "device_vendor_msft_policy_config_microsoft_edgev77.3~policy~microsoft_edge~startup_restoreonstartup_restoreonstartup_5"
-                                                children = @()
-                                            }
-                                        }
-                                    )
-                                }
-                            }
-                        },
+    id = "0"
+    settingInstance = @{
+        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+        settingDefinitionId = "device_vendor_msft_policy_config_microsoft_edgev77.3~policy~microsoft_edge~startup_restoreonstartup"
+        choiceSettingValue = @{
+            # PARENT: Keep as _1 (this enables the policy)
+            value = "device_vendor_msft_policy_config_microsoft_edgev77.3~policy~microsoft_edge~startup_restoreonstartup_1"
+            children = @(
+                @{
+                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                    settingDefinitionId = "device_vendor_msft_policy_config_microsoft_edgev77.3~policy~microsoft_edge~startup_restoreonstartup_restoreonstartup"
+                    choiceSettingValue = @{
+                        # CHILD: Change from _5 to _4 (this sets the behavior)
+                        value = "device_vendor_msft_policy_config_microsoft_edgev77.3~policy~microsoft_edge~startup_restoreonstartup_restoreonstartup_4"
+                        children = @()
+                    }
+                }
+            )
+        }
+    }
+},
                         # Home page location
                         @{
                             id = "1"
